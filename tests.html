@@ -4,27 +4,38 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Self-test · The Fourth Satellite</title>
-<meta name="description" content="Every calculation on the site checked in your browser against published values and the team's research numbers.">
+<meta name="description" content="Every calculation behind The Fourth Satellite, checked in your browser against published values.">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
-<script type="module" src="js/pages/tests.js"></script>
 </head>
 <body>
-<main>
-  <section class="hero wrap">
-    <div class="kicker">Self-test</div>
-    <h1>Check our working</h1>
-    <p class="lead">These checks run the site’s own code, right now in your browser, and compare it with published values and the numbers in our research notes. The same list runs from the command line with <code>node tests/run.js</code>.</p>
-    <div style="display:flex;gap:12px;align-items:center;margin-top:16px;flex-wrap:wrap">
-      <button class="btn primary" type="button" id="rerun">Run the checks again</button>
-      <span class="badge" id="summary">Running…</span>
-    </div>
-  </section>
-  <section class="wrap" style="margin-top:18px">
-    <div id="results" class="card" style="overflow:hidden"></div>
-  </section>
+<main class="page">
+  <p class="eyebrow"><a href="./">← The Fourth Satellite</a></p>
+  <h1>Check the maths</h1>
+  <p class="sub">These checks run the site’s own code, right now in your browser, and compare it with published values and our research notes.</p>
+  <span class="badge" id="summary">Running…</span>
+  <div class="tests" id="results"></div>
 </main>
+<script type="module">
+  import { runAll } from './tests/checks.js';
+  const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  setTimeout(() => {
+    const t0 = performance.now();
+    const results = runAll();
+    let group = '', html = '';
+    for (const r of results) {
+      if (r.group !== group) { group = r.group; html += `<div class="grp">${esc(group)}</div>`; }
+      html += `<div class="row"><div class="res ${r.pass ? 'pass' : 'fail'}">${r.pass ? 'PASS' : 'FAIL'}</div><div><div class="name">${esc(r.name)}</div><div class="det">got: ${esc(r.got)}${r.pass ? '' : `<br>expected: ${esc(r.expected)}`}</div></div></div>`;
+    }
+    document.getElementById('results').innerHTML = html;
+    const passed = results.filter((r) => r.pass).length;
+    const badge = document.getElementById('summary');
+    badge.textContent = `${passed} of ${results.length} passed in ${Math.round(performance.now() - t0)} ms`;
+    badge.className = `badge ${passed === results.length ? 'good' : 'bad'}`;
+  }, 30);
+</script>
 </body>
 </html>

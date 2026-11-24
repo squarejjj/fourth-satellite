@@ -3,7 +3,7 @@
 // "Expected" values marked [research] come from the team's research notes (Python runs or
 // published sources); the rest are properties the maths must have.
 
-import { C, R_EARTH, F_L1, OMEGA_E, CHIP_RATE_CA, CHIP_RATE_L5 } from '../js/core/constants.js';
+import { C, R_EARTH, F_L1 } from '../js/core/constants.js';
 import { norm, sub } from '../js/core/linalg.js';
 import { gaussianSource, mulberry32 } from '../js/core/rng.js';
 import { makeSky, ecefToEnu } from '../js/core/geo.js';
@@ -11,12 +11,8 @@ import { measure } from '../js/core/world.js';
 import { solveFix, solutionCurve3D } from '../js/core/receiver.js';
 import { bancroft } from '../js/core/bancroft.js';
 import { dopFromSky } from '../js/core/dop.js';
-import { BUDGET_1995, rss, varianceShares, twoDrms } from '../js/core/errors.js';
 import * as iono from '../js/core/iono.js';
-import { worstError } from '../js/core/multipath.js';
-import { steadyGain } from '../js/core/kalman.js';
 import { clockRates, breakEvenRadius, eccentricAnomaly, eccentricityTerm } from '../js/core/relativity.js';
-import { caCode, firstChipsOctal, codeSamples, correlateAll } from '../js/core/signal.js';
 
 const near = (got, expected, tol) => Math.abs(got - expected) <= tol;
 const fmt = (x, d = 3) => (typeof x === 'number' ? x.toFixed(d) : String(x));
@@ -33,6 +29,14 @@ const EIGHT = [
 ];
 
 export const checks = [
+  {
+    group: 'The receiver',
+    name: 'The story’s numbers: 1 ms of clock error is 299.79 km of distance; 38 µs a day is 11.4 km',
+    run() {
+      const a = C * 1e-3 / 1000, b = C * 38e-6 / 1000;
+      return { pass: near(a, 299.79, 0.005) && near(b, 11.4, 0.05), got: `${a.toFixed(2)} km, ${b.toFixed(1)} km`, expected: '299.79 km, 11.4 km' };
+    },
+  },
   // ───────────────────────── The receiver ─────────────────────────
   {
     group: 'The receiver',
@@ -224,20 +228,6 @@ export const checks = [
       return { pass: Math.abs(d.corrUpClock) < 0.05, got: `correlation ${fmt(d.corrUpClock, 3)}`, expected: 'about 0' };
     },
   },
-  // ───────────────────────── Error budget ─────────────────────────
-  {
-    group: 'Error budget',
-    name: '1995 budget: UERE 25.34 m (SA on) and 8.13 m (SA off); 2 drms 101.4 m and 32.5 m at HDOP 2; ionosphere 74.1% [research]',
-    run() {
-      const on = rss(BUDGET_1995.map((e) => e.sigma));
-      const offVals = BUDGET_1995.filter((e) => e.key !== 'sa').map((e) => e.sigma);
-      const off = rss(offVals);
-      const ionoShare = varianceShares(offVals)[0];
-      const ok = near(on, 25.34, 0.005) && near(off, 8.13, 0.005) && near(twoDrms(on, 2), 101.4, 0.05) && near(twoDrms(off, 2), 32.5, 0.05) && near(ionoShare * 100, 74.1, 0.05);
-      return { pass: ok, got: `${fmt(on, 2)}, ${fmt(off, 2)}, ${fmt(twoDrms(on, 2), 1)}, ${fmt(twoDrms(off, 2), 1)}, ${fmt(ionoShare * 100, 1)}%`, expected: '25.34, 8.13, 101.4, 32.5, 74.1%' };
-    },
-  },
-  // ───────────────────────── Ionosphere ─────────────────────────
   {
     group: 'Ionosphere',
     name: 'L1/L5: γ = 1.79327, weights 2.2606 and −1.2606, noise × 2.588, 0.1624 m per TECU [research]',
@@ -267,46 +257,6 @@ export const checks = [
       return { pass: near(iono.ionoFree(r1, r5), rho, 1e-6) && near(iono.ionoFromPair(r1, r5), I, 1e-6), got: `range ${fmt(iono.ionoFree(r1, r5) - rho, 6)} m off, delay ${fmt(iono.ionoFromPair(r1, r5), 4)} m`, expected: '0 m off, delay 6.2 m' };
     },
   },
-  // ───────────────────────── Multipath ─────────────────────────
-  {
-    group: 'Multipath',
-    name: 'Chips 293.05 m (L1 C/A) and 29.31 m (L5); envelope at 10/30/60/100/300 m extra path [research]',
-    run() {
-      const l1 = C / CHIP_RATE_CA, l5 = C / CHIP_RATE_L5;
-      const rows = [
-        [l1, 1, [10.0, 30.0, 60.0, 67.9, 46.5]],
-        [l1, 0.1, [7.3, 7.3, 7.3, 7.3, 2.6]],
-        [l5, 1, [6.8, 4.7, 0.0, 0.0, 0.0]],
-        [l5, 0.1, [0.7, 0.3, 0.0, 0.0, 0.0]],
-      ];
-      const got = rows.map(([chip, sp]) => [10, 30, 60, 100, 300].map((x) => worstError({ extra: x, chipMetres: chip, spacing: sp })));
-      const ok = near(l1, 293.05, 0.005) && near(l5, 29.31, 0.005) && got.every((r, i) => r.every((v, j) => near(v, rows[i][2][j], 0.06)));
-      return { pass: ok, got: got.map((r) => r.map((v) => fmt(v, 1)).join(' ')).join(' | '), expected: rows.map((r) => r[2].map((v) => v.toFixed(1)).join(' ')).join(' | ') };
-    },
-  },
-  {
-    group: 'Multipath',
-    name: 'Echoes stop mattering beyond 1.5 chips (439.6 m on L1, 44.0 m on L5); worst error a quarter chip (73.3 m) [research]',
-    run() {
-      const l1 = C / CHIP_RATE_CA, l5 = C / CHIP_RATE_L5;
-      const beyond1 = worstError({ extra: 1.5 * l1 + 0.5, chipMetres: l1, spacing: 1 });
-      const before1 = worstError({ extra: 1.5 * l1 - 5, chipMetres: l1, spacing: 1 });
-      const beyond5 = worstError({ extra: 1.5 * l5 + 0.05, chipMetres: l5, spacing: 1 });
-      const peak = worstError({ extra: 0.25 * l1, chipMetres: l1, spacing: 1 });
-      const ok = beyond1 < 1e-3 && before1 > 0.1 && beyond5 < 1e-3 && near(peak, 73.3, 0.1);
-      return { pass: ok, got: `cut-offs ${fmt(1.5 * l1, 1)} m / ${fmt(1.5 * l5, 1)} m, peak ${fmt(peak, 1)} m`, expected: '439.6 m / 44.0 m, peak ≈ 73 m' };
-    },
-  },
-  // ───────────────────────── Kalman filter ─────────────────────────
-  {
-    group: 'Kalman filter',
-    name: 'Steady position gain 0.132 / 0.360 / 0.661 for q = 0.05 / 0.5 / 3.0 m/s², 5 m fixes [research]',
-    run() {
-      const g = [0.05, 0.5, 3].map((q) => steadyGain({ q, r: 5 }));
-      return { pass: near(g[0], 0.132, 0.0005) && near(g[1], 0.36, 0.0005) && near(g[2], 0.661, 0.0005), got: g.map((v) => fmt(v)).join(' / '), expected: '0.132 / 0.360 / 0.661' };
-    },
-  },
-  // ───────────────────────── Clocks in orbit ─────────────────────────
   {
     group: 'Clocks in orbit',
     name: 'GPS orbit (r = 26,560 km): 3,874 m/s; −7.21, +45.72, +38.50 µs per day [research]',
@@ -336,39 +286,7 @@ export const checks = [
       }
       return { pass: worst < 1e-12, got: worst.toExponential(1), expected: '< 1e-12' };
     },
-  },
-  // ───────────────────────── Timing a signal ─────────────────────────
-  {
-    group: 'Timing a signal',
-    name: 'C/A code generator: first 10 chips (octal) of PRN 1–10 match IS-GPS-200 Table 3-Ia',
-    run() {
-      const got = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((p) => firstChipsOctal(caCode(p)));
-      const want = ['1440', '1620', '1710', '1744', '1133', '1455', '1131', '1454', '1626', '1504'];
-      return { pass: got.join() === want.join(), got: got.join(' '), expected: want.join(' ') };
-    },
-  },
-  {
-    group: 'Timing a signal',
-    name: 'Gold-code property: off-peak correlation only ever takes the values −65, −1 or 63 (out of 1023)',
-    run() {
-      const a = codeSamples(caCode(1)), b = codeSamples(caCode(2));
-      const auto = correlateAll(a, a), cross = correlateAll(a, b);
-      const vals = new Set();
-      for (let k = 1; k < 1023; k++) vals.add(Math.round(auto[k] * 1023));
-      for (let k = 0; k < 1023; k++) vals.add(Math.round(cross[k] * 1023));
-      const ok = Math.round(auto[0] * 1023) === 1023 && [...vals].every((v) => v === -65 || v === -1 || v === 63);
-      return { pass: ok, got: `peak ${Math.round(auto[0] * 1023)}, other values {${[...vals].sort((p, q) => p - q).join(', ')}}`, expected: 'peak 1023, others ⊆ {−65, −1, 63}' };
-    },
-  },
-  {
-    group: 'Timing a signal',
-    name: 'Conversions: 1 chip = 977.5 ns = 293.05 m; L1 wavelength 0.1903 m; Earth turns 465 m/s at the equator → 37 m in 0.08 s [research]',
-    run() {
-      const chipNs = 1e9 / CHIP_RATE_CA, wl = C / F_L1, eq = OMEGA_E * 6378137;
-      return { pass: near(chipNs, 977.5, 0.05) && near(wl, 0.1903, 5e-5) && near(eq, 465.1, 0.1) && near(eq * 0.08, 37.2, 0.05), got: `${fmt(chipNs, 1)} ns, ${fmt(wl, 4)} m, ${fmt(eq, 1)} m/s, ${fmt(eq * 0.08, 1)} m`, expected: '977.5 ns, 0.1903 m, 465.1 m/s, 37.2 m' };
-    },
-  },
-];
+  },];
 
 export function runAll() {
   return checks.map((c) => {

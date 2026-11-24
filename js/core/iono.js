@@ -58,3 +58,7 @@ export const IF_NOISE_FACTOR = Math.hypot(IF_WEIGHTS[0], IF_WEIGHTS[1]); // ≈ 
 export const ionoFree = (r1, r5) => IF_WEIGHTS[0] * r1 + IF_WEIGHTS[1] * r5;
 // The delay itself can be read off the difference: I (on L1) = (R5 − R1) / (γ − 1).
 export const ionoFromPair = (r1, r5) => (r5 - r1) / (GAMMA_L1_L5 - 1);
+
+// How much longer the path through the ionosphere is for a satellite at a given elevation,
+// compared with straight up (the Klobuchar model's slant factor; 1 overhead, about 3 near the horizon).
+export const slantFactor = (elDeg) => 1 + 16 * (0.53 - elDeg / 180) ** 3;
