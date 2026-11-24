@@ -8,17 +8,20 @@ GPS satellites don't send your position. They send the time. Your phone times ea
 
 ## How to use it
 
-1. **Generate World.** A blocky, Earth-sized world builds itself (a new random one each time).
-2. **Scroll.** The model stays in the middle of the screen and changes as you read eight short steps (about two minutes):
-   1. A world the size of Earth, and you on it.
-   2. 24 GPS satellites in six tilted orbits, 20,200 km up.
-   3. Each one broadcasts the time.
-   4. Time becomes distance: one signal puts you on a sphere around its satellite.
-   5. Three spheres meet at one point: you, if your clock is perfect.
-   6. A 1 ms clock error makes every distance 300 km too long. Scrolling slides the meeting point hundreds of km away along an orange line: every place that fits three signals, one for each possible clock error.
-   7. A fourth satellite. As you scroll, the phone shifts its clock guess until all four spheres meet, and it finds you and the clock error together.
-   8. Why real phones use many more satellites, and a note on relativity.
-3. **Lab.** Change the number of satellites (3–8), the phone's clock error, random measurement noise, the delay from the air (ionosphere), and where you stand. Turn the world with the mouse. The phone re-solves every time and shows how far off it is, the clock error it found, and how well spread the satellites are (PDOP).
+1. **Generate World.** A small city builds itself around a car with its navigation on.
+2. **Scroll.** Each step's text slides in, holds while you read, and slides away, while the 3-D model moves and zooms continuously with how far you have scrolled (11 steps, about two minutes):
+   1. You're driving somewhere new; your phone's blue dot sits on your lane.
+   2. Your phone only listens: it never transmits anything to GPS.
+   3. The camera pulls back from the street to the whole Earth: the signals come from 20,200 km up.
+   4. The constellation: 24 satellites in six orbits, so at least four are always above you.
+   5. Each satellite broadcasts the time from its atomic clocks.
+   6. Time becomes distance: a sphere grows out from the satellite until it reaches you.
+   7. Three spheres meet at one point near the Earth: you, if your clock is perfect.
+   8. A 1 ms clock error makes every distance 300 km too long; the meeting point slides hundreds of km along an orange line of places that fit equally well.
+   9. A fourth satellite: the phone shifts its clock guess until all four spheres agree, and finds you and the clock error together.
+   10. In the real world: several satellite systems, the ionosphere, reflections and relativity.
+   11. Back to the car: all of this happens every second.
+3. **Lab.** Click satellites to use or drop them, or try one-click experiments ("Break the clock", "Only 3 satellites", "Add noise", "Bunch them up"). The phone re-solves every time and shows how far off it is, the clock error it found and how well spread the satellites are (PDOP), with a sentence explaining what happened. More settings (clock error, random error, ionosphere delay, where you stand, spheres, moving satellites) are one click away, and a button takes you back to the explanation.
 
 ## How it works
 
@@ -27,17 +30,17 @@ The code is split the way a real receiver is:
 - **`js/core/world.js` (the simulator)** knows the truth: where you are and how wrong your clock is. It turns that into the only thing a receiver gets: one pseudorange per satellite (distance + c × clock error + any extra delays).
 - **`js/core/receiver.js` (the receiver)** sees only satellite positions and pseudoranges, never the truth. It solves with Gauss–Newton least squares: guess (the centre of the Earth), predict each pseudorange, replace each curved equation by its tangent, solve the small linear system, repeat. The clock is a column of ones in the matrix. If a full step makes the fit worse, it takes half a step, which keeps it converging from the Earth's centre even with bunched satellites. With exactly three satellites it also computes the curve of every position that fits (three-sphere intersection for each clock guess). `receiver.js` does not import `world.js`; a test checks that.
 
-`js/scene.js` draws the result with Three.js: the generated world, the orbits, the satellite models, the distance spheres, the lines where pairs of spheres meet, the orange curve and the phone's answer. `js/app.js` runs the page: the home screen, the scroll steps and the lab panel.
+`js/scene.js` draws the Earth and the satellites with Three.js, and `js/city.js` draws the opening city scene (in metres, as its own scene, because a street and a planet are too different in size to share one). `js/app.js` runs the page: one animation loop turns the scroll position into a single smoothed number (how many steps you are through the story) and both scenes draw themselves from it, which is why the model glides instead of jumping.
 
 ### What is computed and what is drawn by hand
 
-Computed by our code from what you set: every satellite position and visibility (above 10°), every measurement, the phone's answer, the clock error it finds, the spheres, the lines where they meet, the orange curve, the numbers in the text and PDOP. In step 7 the phone's clock guess is shown sliding from 0 to the value the solver found, so you can watch the spheres shrink together; the end point is the solver's actual answer.
+Computed by our code from what you set: every satellite position and visibility (above 10°), every measurement, the phone's answer, the clock error it finds, the spheres, the lines where pairs of spheres meet, the orange curve, the numbers in the text and PDOP. In step 9 the phone's clock guess is shown sliding from 0 to the value the solver found, so you can watch the spheres shrink together; the end point is the solver's actual answer.
 
-Drawn by hand: the land and sea of the generated world (random noise, not real geography), the satellite models, and the orbit speed (one orbit takes 60 seconds instead of about 12 hours).
+Drawn by hand: the city, the car and its route (scenery: no GPS is computed there), the satellite models, and the orbit speed when lab satellites move (one orbit in 90 seconds instead of about 12 hours).
 
 ## What we simplified
 
-- The Earth is a sphere (GPS uses the WGS84 ellipsoid), and the world's geography is made up.
+- The Earth is a sphere (GPS uses the WGS84 ellipsoid). The city is invented scenery.
 - The 24 satellites sit in six evenly spaced circular orbits; real orbits are slightly elliptical and spaced less evenly. The Earth's spin isn't shown.
 - Satellites hold still while the receiver solves, and satellite clocks are perfect.
 - In the lab, noise is independent on each satellite, and the air delay is a fixed delay straight up, stretched by the Klobuchar slant factor for lower satellites.
@@ -66,7 +69,7 @@ There is no build step and nothing to install. From the top of the repository:
 python3 -m http.server 8000
 ```
 
-Then open <http://localhost:8000/>. Browsers won't load JavaScript modules from a file opened directly, which is why it needs a server. The page needs an internet connection to fetch Three.js and the font. Add `?still` to the address to make camera moves instant (handy for screenshots or slow devices).
+Then open <http://localhost:8000/>. Browsers won't load JavaScript modules from a file opened directly, which is why it needs a server. The page needs an internet connection to fetch Three.js, the Earth imagery and the font. Add `?still` to the address to make camera moves instant (handy for screenshots or slow devices).
 
 ## The code
 
@@ -79,8 +82,9 @@ Then open <http://localhost:8000/>. Browsers won't load JavaScript modules from 
 | `js/core/bancroft.js` | Bancroft's closed-form solution, used by the tests as an independent check |
 | `js/core/relativity.js` | Relativistic clock rates (the 38 µs per day in the story) |
 | `js/core/geo.js`, `linalg.js`, `rng.js`, `constants.js` | Coordinates, small matrices, seeded random numbers, constants |
-| `js/scene.js` | The 3-D world (drawing only) |
-| `js/app.js` | The page: home, scroll steps, lab |
+| `js/scene.js` | The Earth, satellites, spheres and lab (drawing and interaction) |
+| `js/city.js` | The opening city scene (scenery only) |
+| `js/app.js` | The page: home, scroll steps, lab controls |
 | `tests/` | The checks and the command-line runner |
 
 ## Things we didn't make ourselves
@@ -88,7 +92,8 @@ Then open <http://localhost:8000/>. Browsers won't load JavaScript modules from 
 | What | Where it's used | Why |
 |---|---|---|
 | [Three.js](https://threejs.org) r160, loaded from the jsDelivr CDN | Drawing the 3-D model | WebGL by hand would be thousands of lines that teach nothing about GPS. Three.js only draws; positions and solutions come from our code. MIT licence. |
-| Pixelify Sans, from Google Fonts | All text | A readable pixel font for the blocky look (SIL Open Font License). |
+| Earth imagery (colour, normal and cloud maps) from the three.js examples, loaded from jsDelivr | The Earth's surface | Real imagery reads instantly as "Earth"; we did not want to ship our own copy. |
+| Pixelify Sans, from Google Fonts | All text | A readable pixel font (SIL Open Font License). |
 
 Parts of the code and text were drafted with an AI coding assistant (Claude, by Anthropic), working from the team's research notes.
 

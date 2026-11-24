@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>The Fourth Satellite</title>
-<meta name="description" content="Why your phone needs four satellites to find you. Generate a world, scroll through how GPS works, then try it yourself in the lab.">
+<title>The Fourth Satellite · how GPS finds you</title>
+<meta name="description" content="How does your phone know where you are? From a car in a city to satellites 20,200 km up: scroll through how GPS works, then try it yourself in the lab.">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -15,77 +15,105 @@
 </head>
 <body class="mode-intro">
 <canvas id="world" aria-hidden="true"></canvas>
+<canvas id="city" aria-hidden="true"></canvas>
+<div id="labels" aria-hidden="true"></div>
 <a class="wordmark" href="./">The Fourth Satellite</a>
 
 <section class="home" id="home">
-  <p class="eyebrow">How GPS works · 2 minutes</p>
+  <p class="eyebrow">GPS, explained in 2 minutes</p>
   <h1>The Fourth<br>Satellite</h1>
-  <p class="sub">Why does your phone need four satellites to find you?</p>
-  <button class="mc" id="generate" type="button">Generate World</button>
-  <p class="fine" id="home-note">Everything you will see is computed live in your browser.</p>
+  <p class="sub">How does your phone know exactly where you are?</p>
+  <button class="btn big" id="generate" type="button">Generate World</button>
+  <p class="fine" id="home-note">Then scroll. Everything you see is computed live in your browser.</p>
 </section>
 
-<div class="story" id="story">
-  <div class="panel" id="panel" aria-live="polite">
-    <article class="card" data-step="0"><span class="n">1 / 8</span>
-      <h2>A world the size of Earth</h2>
-      <p>12,742 km across. The black block is you, holding a phone. Scroll to see how it finds you.</p></article>
-    <article class="card" data-step="1"><span class="n">2 / 8</span>
-      <h2>24 satellites, 20,200 km up</h2>
-      <p>GPS satellites circle in six tilted orbits, twice a day, so several are always above you.</p></article>
-    <article class="card" data-step="2"><span class="n">3 / 8</span>
-      <h2>Each one broadcasts the time</h2>
-      <p>Every satellite carries an atomic clock and sends out signals stamped with the exact time they left.</p></article>
-    <article class="card" data-step="3"><span class="n">4 / 8</span>
-      <h2>Time becomes distance</h2>
-      <p>This signal took <b data-live="t1">0.07 s</b> to reach you. Travel time × the speed of light = <b data-live="d1">21,000 km</b>. So you are somewhere on a sphere that size around the satellite.</p></article>
-    <article class="card" data-step="4"><span class="n">5 / 8</span>
-      <h2>Three spheres meet at one point</h2>
-      <p>Do the same with two more satellites. The three spheres meet at just one spot: you. But only if your phone’s clock is perfect.</p></article>
-    <article class="card" data-step="5"><span class="n">6 / 8</span>
-      <h2>Your phone’s clock isn’t</h2>
-      <p>Satellites have atomic clocks; your phone has a cheap quartz crystal. Off by <b data-live="clk">1.00 ms</b>, every distance is <b data-live="km">300 km</b> too long, and the spheres meet <b data-live="off">far</b> from you. Every point on the <span class="or">orange line</span> fits these signals, one for each possible clock error.</p></article>
-    <article class="card" data-step="6"><span class="n">7 / 8</span>
-      <h2>So time is the fourth unknown</h2>
-      <p>Your phone solves for x, y, z <i>and</i> the time, so it needs a fourth satellite. It shifts its clock guess until all four spheres meet. Clock error found: <b data-live="found">0 ms</b>. Off by: <b data-live="err">—</b>.</p></article>
-    <article class="card" data-step="7"><span class="n">8 / 8</span>
-      <h2>That’s why GPS needs four</h2>
-      <p>Real phones use eight or more satellites, from GPS and other systems, to average out smaller errors: air slowing the signal, echoes off buildings. Even relativity counts: satellite clocks gain 38 microseconds a day, and GPS corrects for it.</p></article>
-    <article class="card end" data-step="8">
-      <h2>Now try it yourself</h2>
-      <p>Change the clock, the satellites, the noise and where you stand. Your phone re-solves instantly.</p>
-      <button class="mc" id="open-lab" type="button">Lab</button></article>
-  </div>
-  <div class="track" id="track" aria-hidden="true">
-    <div class="space"></div><div class="space"></div><div class="space"></div><div class="space"></div><div class="space"></div>
-    <div class="space long"></div><div class="space long"></div><div class="space"></div><div class="space last"></div>
-  </div>
-  <nav class="dots" id="dots" aria-label="Jump to a step"></nav>
-  <div class="hint" id="hint">Scroll</div>
-</div>
+<main class="story" id="story" aria-label="How GPS works">
+  <section class="step"><div class="copy">
+    <p class="kick">Everyday magic</p>
+    <h2>You’re driving somewhere new.</h2>
+    <p>Your phone draws a blue dot on the right street, in the right lane, every second. That dot is GPS.</p></div></section>
+  <section class="step"><div class="copy">
+    <p class="kick">The blue dot</p>
+    <h2>Your phone only listens.</h2>
+    <p>It never sends anything to GPS. It picks up faint radio signals and works out where it must be to hear them as it does.</p></div></section>
+  <section class="step"><div class="copy">
+    <p class="kick">Pull back</p>
+    <h2>The signals come from space.</h2>
+    <p>From satellites 20,200 km up, more than three Earth radii away, each moving at almost 4 km a second.</p></div></section>
+  <section class="step"><div class="copy">
+    <p class="kick">The constellation</p>
+    <h2>24 satellites, 6 orbits.</h2>
+    <p>They circle the Earth twice a day in six tilted rings, spaced so that at least four are above you wherever you stand.</p></div></section>
+  <section class="step"><div class="copy">
+    <p class="kick">Step 1 · Time</p>
+    <h2>Each satellite broadcasts the time.</h2>
+    <p>Atomic clocks on board keep time to billionths of a second. Every signal carries the moment it left and where the satellite was.</p></div></section>
+  <section class="step"><div class="copy">
+    <p class="kick">Step 2 · Distance</p>
+    <h2>Time becomes distance.</h2>
+    <p>This signal took <b data-live="t1">0.07 s</b> to arrive. At the speed of light that is <b data-live="d1">21,000 km</b>, so you are somewhere on a sphere of that radius around the satellite.</p></div></section>
+  <section class="step"><div class="copy">
+    <p class="kick">Step 3 · Position</p>
+    <h2>Three spheres meet at one point.</h2>
+    <p>Two more satellites, two more spheres. Near the Earth, all three meet at a single point: you. At least, if your phone’s clock is perfect.</p></div></section>
+  <section class="step"><div class="copy">
+    <p class="kick">The catch</p>
+    <h2>Your phone’s clock isn’t.</h2>
+    <p>It runs on a cheap quartz crystal. Just <b data-live="clk">1.00 ms</b> off, every distance is <b data-live="km">300 km</b> too long, and the spheres meet <b data-live="off">far</b> away. Every point on the <span class="or">orange line</span> fits the three signals equally well.</p></div></section>
+  <section class="step"><div class="copy">
+    <p class="kick">The fix</p>
+    <h2>Time is the fourth unknown.</h2>
+    <p>x, y, z and the clock error: four unknowns need four measurements, so a fourth satellite. The phone shifts its clock until all four spheres agree. Clock error found: <b data-live="found">0 ms</b>. Off by <b data-live="err">—</b>.</p></div></section>
+  <section class="step"><div class="copy">
+    <p class="kick">In the real world</p>
+    <h2>More satellites, smaller errors.</h2>
+    <p>Phones also listen to Galileo, GLONASS and BeiDou. Extra satellites average out what’s left: the ionosphere delays signals by metres, buildings bounce them, and relativity makes satellite clocks gain 38 µs a day, which GPS corrects for.</p></div></section>
+  <section class="step end"><div class="copy">
+    <p class="kick">Back on the road</p>
+    <h2>All of this, every second.</h2>
+    <p>Four or more signals, one clock error solved, one blue dot on your lane.</p>
+    <div class="actions"><button class="btn" id="open-lab" type="button">Try it in the Lab</button><button class="link" id="to-top" type="button">↑ Start again</button></div></div></section>
+</main>
+<nav class="dots" id="dots" aria-label="Jump to a step"></nav>
+<div class="hint" id="hint">Scroll</div>
 
 <aside class="lab" id="lab" aria-label="Lab">
-  <div class="lab-head"><h2>Lab</h2><button class="link" id="back" type="button">← Story</button></div>
-  <p class="lab-sub">Change anything. Drag the world to turn it, scroll to zoom.</p>
-  <div class="ctl"><div class="lbl">Satellites used</div>
-    <div class="seg" id="lab-n" role="group" aria-label="Satellites used">
-      <button type="button" data-n="3">3</button><button type="button" data-n="4" aria-pressed="true">4</button><button type="button" data-n="5">5</button><button type="button" data-n="6">6</button><button type="button" data-n="8">8</button>
-    </div></div>
-  <div class="ctl"><label for="lab-clock">Phone’s clock error <output id="o-clock">+0.30 ms</output></label><input type="range" id="lab-clock" min="-1" max="1" step="0.01" value="0.3"></div>
-  <div class="ctl"><label for="lab-noise">Measurement noise <output id="o-noise">0 m</output></label><input type="range" id="lab-noise" min="0" max="20" step="0.5" value="0"></div>
-  <div class="ctl"><label for="lab-iono">Air delay, straight up <output id="o-iono">0 m</output></label><input type="range" id="lab-iono" min="0" max="15" step="0.5" value="0"></div>
-  <div class="ctl"><label for="lab-lat">Where you stand <output id="o-lat">37°N</output></label><input type="range" id="lab-lat" min="-80" max="80" step="1" value="37.5"></div>
-  <div class="ctl checks">
-    <label class="check"><input type="checkbox" id="lab-spheres" checked> Spheres</label>
-    <label class="check"><input type="checkbox" id="lab-move" checked> Satellites move</label>
+  <button class="back" id="back" type="button">← Back to the explanation</button>
+  <h2>Lab</h2>
+  <p class="lab-sub">You are the blue dot. <b>Click a satellite</b> to use or drop it. Drag to turn the Earth.</p>
+
+  <div class="result">
+    <div><span class="k">Phone’s answer is off by</span><span class="v" id="r-off">—</span></div>
+    <div><span class="k">Clock error it found</span><span class="v" id="r-clock">—</span></div>
+    <div><span class="k">Satellites used</span><span class="v" id="r-count">—</span></div>
+    <div><span class="k">Spread (PDOP)</span><span class="v" id="r-dop">—</span></div>
   </div>
-  <dl class="read">
-    <dt>Unknowns vs satellites</dt><dd id="r-count">—</dd>
-    <dt>Phone’s answer is off by</dt><dd id="r-off">—</dd>
-    <dt>Clock error it found</dt><dd id="r-clock">—</dd>
-    <dt>Satellite spread (PDOP)</dt><dd id="r-dop">—</dd>
-  </dl>
   <p class="note" id="r-note"></p>
+
+  <div class="ctl"><div class="lbl">Try an experiment</div>
+    <div class="exps" id="exps">
+      <button type="button" data-exp="clock">Break the clock</button>
+      <button type="button" data-exp="three">Only 3 satellites</button>
+      <button type="button" data-exp="noise">Add noise</button>
+      <button type="button" data-exp="bunch">Bunch them up</button>
+    </div></div>
+
+  <details class="settings">
+    <summary>All settings</summary>
+    <div class="ctl"><div class="lbl">Satellites used</div>
+      <div class="seg" id="lab-n" role="group" aria-label="Satellites used">
+        <button type="button" data-n="3">3</button><button type="button" data-n="4" aria-pressed="true">4</button><button type="button" data-n="5">5</button><button type="button" data-n="6">6</button><button type="button" data-n="8">8</button>
+      </div></div>
+    <div class="ctl"><label for="lab-clock">Phone’s clock error <output id="o-clock">+0.30 ms</output></label><input type="range" id="lab-clock" min="-1" max="1" step="0.01" value="0.3"></div>
+    <div class="ctl"><label for="lab-noise">Random error per satellite <output id="o-noise">0 m</output></label><input type="range" id="lab-noise" min="0" max="20" step="0.5" value="0"></div>
+    <div class="ctl"><label for="lab-iono">Ionosphere delay, straight up <output id="o-iono">0 m</output></label><input type="range" id="lab-iono" min="0" max="15" step="0.5" value="0"></div>
+    <div class="ctl"><label for="lab-lat">Where you stand <output id="o-lat">38°N</output></label><input type="range" id="lab-lat" min="-80" max="80" step="1" value="37.5"></div>
+    <div class="ctl checks">
+      <label class="check"><input type="checkbox" id="lab-spheres"> Show the spheres</label>
+      <label class="check"><input type="checkbox" id="lab-move"> Satellites move</label>
+    </div>
+  </details>
+  <div class="views"><button class="link" type="button" data-view="you">Zoom to you</button><button class="link" type="button" data-view="space">View from space</button><button class="link" type="button" id="reset">Reset</button></div>
   <p class="links"><a href="tests.html">Check the maths</a> · <a href="https://github.com/squarejjj/fourth-satellite">Code</a></p>
 </aside>
 </body>

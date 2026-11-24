@@ -1,7 +1,13 @@
-// The 3-D world. Three.js only DRAWS it. Every satellite position, measurement and answer
-// comes from our own code: world.js makes the measurements, receiver.js solves them.
+// The Earth and the satellites. Three.js only DRAWS this scene. Every satellite position,
+// measurement and answer comes from our own code: world.js makes the measurements, receiver.js
+// solves them.
+//
+// In the story, everything on screen is a smooth function of one number, g: how far you have
+// scrolled, counted in steps (step 2 is the first one in space, step 10 the last). Half-way
+// between two steps shows the model half-way between them, so it glides as you scroll.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
@@ -14,21 +20,22 @@ import { slantFactor } from './core/iono.js';
 import { sub, norm } from './core/linalg.js';
 import { gaussianSource } from './core/rng.js';
 
-const U = 1e6;                                         // 1 scene unit = 1,000 km
-const R = 6.371;                                       // Earth's radius in scene units
+const U = 1e6;                                             // 1 scene unit = 1,000 km
+const R = 6.371;                                           // Earth's radius in scene units
 const toV = (p) => new THREE.Vector3(p[0] / U, p[2] / U, -p[1] / U); // ECEF metres → scene (y = north pole)
 const toDir = (d) => new THREE.Vector3(d[0], d[2], -d[1]);
 const DEG = Math.PI / 180;
-const BG = 0xf4f6f8;
-export const SAT_COLORS = ['#2563eb', '#db2777', '#7c3aed', '#059669', '#ca8a04', '#0891b2', '#9333ea', '#65a30d', '#e11d48', '#0d9488'];
-const ORANGE = '#f97316';
-const INK = '#1d1d1f';
-const LON = 127, STORY_LAT = 37.5, MASK = 10, CLOCK_MS = 1;
-// "?still" in the address: move the camera instantly instead of gliding (for screenshots and slow devices).
-const STILL = new URLSearchParams(location.search).has('still') || matchMedia('(prefers-reduced-motion: reduce)').matches;
+export const SAT_COLORS = ['#0a84ff', '#ff375f', '#bf5af2', '#28a745', '#ff9f0a', '#5ac8fa', '#ffcc00', '#a2845e'];
+const ORANGE = '#ff9500';
+const LON = 127, STORY_LAT = 37.5, MASK = 10, CLOCK_MS = 1, STORY_T = 8;
+const TEX = 'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r160/examples/textures/planets/';
 
-// The GPS constellation, simplified: 24 satellites in 6 orbit planes tilted 55°.
-const PERIOD = 60;                                     // seconds per orbit on screen (real: about 12 hours)
+const clamp01 = (x) => Math.min(1, Math.max(0, x));
+const ramp = (g, a, b) => { const t = clamp01((g - a) / (b - a)); return t * t * (3 - 2 * t); }; // smooth 0 → 1 between a and b
+const band = (g, a, b, c, d) => ramp(g, a, b) * (1 - ramp(g, c, d));                             // in at a–b, out at c–d
+
+// The GPS constellation, simplified: 24 satellites in 6 circular orbits tilted 55°.
+const PERIOD = 90;                                         // seconds per orbit when the lab's satellites move
 const CONST = [];
 for (let p = 0; p < 6; p++) for (let s = 0; s < 4; s++) CONST.push({ id: p * 4 + s + 1, raan: p * 60 * DEG, u0: (s * 90 + p * 15) * DEG });
 function satPos(sat, t) {
@@ -36,573 +43,531 @@ function satPos(sat, t) {
   const cu = Math.cos(u), su = Math.sin(u), cO = Math.cos(sat.raan), sO = Math.sin(sat.raan);
   return [R_GPS * (cu * cO - su * Math.cos(i) * sO), R_GPS * (cu * sO + su * Math.cos(i) * cO), R_GPS * su * Math.sin(i)];
 }
-
-// Smooth value noise, used only to colour the blocks of the generated world.
-function makeNoise(seed) {
-  const hash = (x, y, z) => {
-    let h = Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ Math.imul(z, 1274126177) ^ Math.imul(seed, 1103515245);
-    h = Math.imul(h ^ (h >>> 13), 1274126177);
-    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+// Satellites above your horizon (10° mask), with their direction in your sky.
+function skyOf(P, B, positions) {
+  return CONST.map((s, i) => {
+    const [e, n, u] = ecefToEnu(sub(positions[i], P), B);
+    const r = Math.hypot(e, n, u);
+    return { id: s.id, i, pos: positions[i], az: ((Math.atan2(e, n) / DEG) + 360) % 360, el: Math.asin(u / r) / DEG };
+  }).filter((q) => q.el > MASK);
+}
+// Every group of four visible satellites, scored by geometry (GDOP).
+function fours(vis) {
+  const out = [];
+  const rec = (start, acc) => {
+    if (acc.length === 4) { const d = dopFromSky(acc); if (d.ok) out.push({ g: d.gdop, set: [...acc] }); return; }
+    for (let i = start; i < vis.length; i++) { acc.push(vis[i]); rec(i + 1, acc); acc.pop(); }
   };
-  const sm = (t) => t * t * (3 - 2 * t);
-  const lerp = (a, b, t) => a + (b - a) * t;
-  const vn = (x, y, z) => {
-    const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
-    const xf = sm(x - xi), yf = sm(y - yi), zf = sm(z - zi);
-    const c = (a, b, d) => hash(xi + a, yi + b, zi + d);
-    return lerp(lerp(lerp(c(0, 0, 0), c(1, 0, 0), xf), lerp(c(0, 1, 0), c(1, 1, 0), xf), yf),
-      lerp(lerp(c(0, 0, 1), c(1, 0, 1), xf), lerp(c(0, 1, 1), c(1, 1, 1), xf), yf), zf);
-  };
-  return (x, y, z) => {
-    let s = 0, a = 0.5, f = 1;
-    for (let o = 0; o < 4; o++) { s += a * vn(x * f + o * 7.3, y * f + o * 3.1, z * f + o * 5.7); f *= 2; a *= 0.5; }
-    return s;
-  };
+  rec(0, []);
+  return out;
+}
+const byAz = (a, b) => a.az - b.az;
+// The best-spread n satellites: the best four, then the best extras one at a time.
+function bestSet(vis, n) {
+  const all = fours(vis);
+  let used = all.length ? all.reduce((a, b) => (b.g < a.g ? b : a)).set : vis.slice(0, 4);
+  while (used.length < Math.min(n, vis.length)) {
+    let pick = null;
+    for (const q of vis) if (!used.includes(q)) { const d = dopFromSky([...used, q]); if (d.ok && (!pick || d.gdop < pick.g)) pick = { g: d.gdop, q }; }
+    if (!pick) break;
+    used.push(pick.q);
+  }
+  used.sort(byAz);
+  return n === 3 ? used.slice(0, 3) : used;
+}
+// Four satellites bunched together in one part of the sky (the worst geometry that still solves).
+function bunchedSet(vis) {
+  const ok = fours(vis).filter((x) => x.g < 30);
+  return ok.length ? ok.reduce((a, b) => (b.g > a.g ? b : a)).set.sort(byAz) : bestSet(vis, 4);
 }
 
-export function createScene(canvas, { onReadout = () => {} } = {}) {
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+// ── Shaders: a soft blue rim of atmosphere, and glassy distance spheres ──
+const glowMaterial = () => new THREE.ShaderMaterial({
+  uniforms: { color: { value: new THREE.Color('#5aa9ff') } },
+  vertexShader: 'varying vec3 vN; void main(){ vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: 'uniform vec3 color; varying vec3 vN; void main(){ float i = pow(clamp(0.78 - dot(vN, vec3(0.0, 0.0, 1.0)), 0.0, 1.0), 3.0); gl_FragColor = vec4(color, i * 1.1); }',
+  side: THREE.BackSide, transparent: true, depthWrite: false,
+});
+const glassMaterial = (color) => new THREE.ShaderMaterial({
+  uniforms: { color: { value: new THREE.Color(color) }, opacity: { value: 0 } },
+  vertexShader: 'varying vec3 vN; varying vec3 vV; void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }',
+  fragmentShader: 'uniform vec3 color; uniform float opacity; varying vec3 vN; varying vec3 vV; void main(){ float f = 1.0 - abs(dot(normalize(vN), normalize(vV))); gl_FragColor = vec4(color, opacity * (0.035 + 0.6 * pow(f, 3.0))); }',
+  side: THREE.DoubleSide, transparent: true, depthWrite: false,
+});
+function dotTexture(color) {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 128;
+  const c = cv.getContext('2d');
+  c.shadowColor = 'rgba(0,0,0,0.3)'; c.shadowBlur = 10; c.shadowOffsetY = 2;
+  c.fillStyle = '#ffffff'; c.beginPath(); c.arc(64, 63, 28, 0, Math.PI * 2); c.fill();
+  c.shadowColor = 'transparent';
+  c.fillStyle = color; c.beginPath(); c.arc(64, 63, 20, 0, Math.PI * 2); c.fill();
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+export function createScene(canvas, { labelLayer, onReadout = () => {}, onPick = () => {} } = {}) {
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.3;
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(BG);
-  const camera = new THREE.PerspectiveCamera(36, 1, 0.02, 2000);
-  camera.position.set(14, 18, 60);
-  const look = new THREE.Vector3();
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  const camera = new THREE.PerspectiveCamera(34, 1, 0.02, 2000);
+  camera.position.set(0, 6, 40);
   const controls = new OrbitControls(camera, canvas);
-  controls.enableDamping = true;
-  controls.enablePan = false;
-  controls.minDistance = 1.5;
-  controls.maxDistance = 170;
-  controls.enabled = false;
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x9aa6b2, 2.2));
-  const sun = new THREE.DirectionalLight(0xffffff, 1.5);
-  sun.position.set(30, 45, 40);
-  scene.add(sun);
+  controls.enableDamping = true; controls.enablePan = false; controls.minDistance = 7.5; controls.maxDistance = 140; controls.enabled = false;
+  const sunLight = new THREE.DirectionalLight(0xffffff, 2.1);
+  scene.add(sunLight, new THREE.HemisphereLight(0xffffff, 0x8a9bb0, 0.7));
 
-  // ── The generated world: about 5,000 blocks, each 320 km across ──
-  const world = new THREE.Group();
-  scene.add(world);
-  let blocks = null, cells = [], genStart = null;
-  function buildWorld(seed) {
-    world.clear();
-    const s = 0.32, n = Math.ceil(R / s) + 1, noise = makeNoise(seed);
-    cells = [];
-    for (let i = -n; i <= n; i++) for (let j = -n; j <= n; j++) for (let k = -n; k <= n; k++) {
-      const x = i * s, y = j * s, z = k * s, r = Math.hypot(x, y, z);
-      if (r > R || r <= R - s) continue;
-      cells.push({ x, y, z, lat: Math.asin(y / r) / DEG, v: noise(x / r * 1.8 + 11, y / r * 1.8, z / r * 1.8) });
-    }
-    // colour by rank, so every world has the same share of sea and land
-    const sorted = cells.map((c) => c.v).sort((a, b) => a - b);
-    const q = (f) => sorted[Math.floor(f * (sorted.length - 1))];
-    const t = [q(0.42), q(0.6), q(0.64), q(0.86), q(0.95)];
-    const pal = { deep: 0x2f6fb3, sea: 0x4a90d9, sand: 0xe3d391, grass: 0x6bb04a, forest: 0x3f8a3a, stone: 0x8d8f8a, ice: 0xf1f5f8 };
-    const geo = new THREE.BoxGeometry(s, s, s);
-    blocks = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial(), cells.length);
-    const m = new THREE.Matrix4(), col = new THREE.Color();
-    cells.forEach((c, i) => {
-      const key = Math.abs(c.lat) > 74 - c.v * 10 ? 'ice' : c.v < t[0] ? 'deep' : c.v < t[1] ? 'sea' : c.v < t[2] ? 'sand' : c.v < t[3] ? 'grass' : c.v < t[4] ? 'forest' : 'stone';
-      col.setHex(pal[key]).offsetHSL(0, 0, ((i * 7919) % 13) / 200 - 0.03);
-      blocks.setColorAt(i, col);
-      c.delay = 0.5 - c.y / (2 * R) + ((i * 104729) % 97) / 600; // sweep from the north pole down
-      m.makeScale(0.0001, 0.0001, 0.0001).setPosition(c.x, c.y, c.z);
-      blocks.setMatrixAt(i, m);
-    });
-    world.add(blocks);
-    const core = new THREE.Mesh(new THREE.SphereGeometry(R - s * 0.9, 48, 32), new THREE.MeshLambertMaterial({ color: 0x2c5f99 }));
-    world.add(core);
-    core.visible = false;
-    world.userData.core = core;
-  }
-  function animateWorld(now) {
-    if (genStart === null || !blocks) return;
-    const tt = (now - genStart) / 1000;
-    const m = new THREE.Matrix4();
-    let done = true;
-    cells.forEach((c, i) => {
-      const f = Math.min(1, Math.max(0, (tt - c.delay * 1.3) / 0.35));
-      if (f < 1) done = false;
-      const k = f <= 0 ? 0.0001 : Math.min(1, f * 1.4) * (1 + 0.25 * Math.sin(f * Math.PI) * (1 - f)); // pop in, with a little bounce
-      m.makeScale(k, k, k).setPosition(c.x, c.y, c.z);
-      blocks.setMatrixAt(i, m);
-    });
-    blocks.instanceMatrix.needsUpdate = true;
-    if (tt > 0.4) world.userData.core.visible = true;
-    if (done) genStart = null;
-  }
+  // ── Earth: real imagery, a little cloud, and a blue rim of atmosphere ──
+  const earth = new THREE.Group();
+  const earthMat = new THREE.MeshStandardMaterial({ color: 0x5b8fc4, roughness: 0.85, metalness: 0 });
+  earth.add(new THREE.Mesh(new THREE.SphereGeometry(R, 128, 96), earthMat));
+  const cloudMat = new THREE.MeshStandardMaterial({ transparent: true, opacity: 0, depthWrite: false, roughness: 1 });
+  const clouds = new THREE.Mesh(new THREE.SphereGeometry(R * 1.008, 96, 72), cloudMat);
+  earth.add(clouds);
+  earth.add(new THREE.Mesh(new THREE.SphereGeometry(R * 1.07, 96, 72), glowMaterial()));
+  scene.add(earth);
+  const loader = new THREE.TextureLoader();
+  const sharp = Math.min(window.innerWidth, window.innerHeight) > 700;   // big screens get the sharper imagery
+  loader.load(`${TEX}earth_atmos_${sharp ? 4096 : 2048}.jpg`, (t) => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; earthMat.map = t; earthMat.color.set(0xffffff); earthMat.needsUpdate = true; });
+  loader.load(`${TEX}earth_normal_2048.jpg`, (t) => { earthMat.normalMap = t; earthMat.normalScale.set(0.5, 0.5); earthMat.needsUpdate = true; });
+  loader.load(`${TEX}earth_clouds_${sharp ? 2048 : 1024}.png`, (t) => { t.colorSpace = THREE.SRGBColorSpace; cloudMat.map = t; cloudMat.opacity = 0.35; cloudMat.needsUpdate = true; });
 
-  // ── Orbits and satellite models ──
-  const orbits = new THREE.Group();
-  for (let p = 0; p < 6; p++) {
-    const pts = [];
-    for (let k = 0; k <= 160; k++) pts.push(toV(satPos({ raan: p * 60 * DEG, u0: 0 }, (k / 160) * PERIOD)));
-    orbits.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0x9aa3ad, transparent: true, opacity: 0.55 })));
-  }
-  scene.add(orbits);
-  const gold = new THREE.MeshLambertMaterial({ color: 0xf2c14e }), blue = new THREE.MeshLambertMaterial({ color: 0x2f5bd3 }), grey = new THREE.MeshLambertMaterial({ color: 0x7b8086 });
+  // ── Satellites: gold body (tinted in its colour when in use), dark solar panels ──
+  const panelMat = new THREE.MeshStandardMaterial({ color: 0x1c2b4f, metalness: 0.55, roughness: 0.22 });
+  const whiteMat = new THREE.MeshStandardMaterial({ color: 0xf2f2f2, metalness: 0.2, roughness: 0.4 });
   const sats = CONST.map(() => {
     const g = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.46, 0.62), gold.clone());
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.55), new THREE.MeshStandardMaterial({ color: 0xd8a84a, metalness: 0.9, roughness: 0.32 }));
     g.add(body);
-    for (const sx of [-1, 1]) { const pnl = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.05, 0.44), blue); pnl.position.x = sx * 0.8; g.add(pnl); }
-    const ant = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.24), grey);
-    ant.position.z = 0.42;                                  // lookAt() points +z at the Earth
-    g.add(ant);
-    const label = makeLabel();
-    label.position.y = 0.95;
-    g.add(label);
-    g.userData = { body, label };
-    scene.add(g);
-    return g;
-  });
-
-  // ── You, and the receiver's answer ──
-  const you = new THREE.Group();
-  const youCube = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.16), new THREE.MeshBasicMaterial({ color: INK }));
-  you.add(youCube);
-  const youLabel = makeLabel('You', INK);
-  you.add(youLabel);
-  scene.add(you);
-  const answer = new THREE.Group();
-  answer.add(new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.15), new THREE.MeshBasicMaterial({ color: ORANGE, depthTest: false })));
-  const answerLabel = makeLabel('', ORANGE);
-  answer.add(answerLabel);
-  answer.children[0].renderOrder = 6;
-  scene.add(answer);
-  const pulse = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.22), new THREE.MeshBasicMaterial({ color: 0xfacc15 }));
-  scene.add(pulse);
-  const distLabel = makeLabel('', INK);
-  scene.add(distLabel);
-
-  // ── Things redrawn as the state changes ──
-  const sphereGeo = new THREE.SphereGeometry(1, 64, 48);
-  const wireGeo = new THREE.WireframeGeometry(new THREE.SphereGeometry(1, 28, 18));
-  const spheres = SAT_COLORS.map((c) => {
-    const g = new THREE.Group();
-    g.add(new THREE.Mesh(sphereGeo, new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.07, depthWrite: false, side: THREE.DoubleSide })));
-    g.add(new THREE.LineSegments(wireGeo, new THREE.LineBasicMaterial({ color: c, transparent: true, opacity: 0.16, depthWrite: false })));
+    for (const sx of [-1, 1]) { const p = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.025, 0.4), panelMat); p.position.x = sx * 0.74; g.add(p); }
+    const dish = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.13, 0.18, 20), whiteMat);
+    dish.rotation.x = Math.PI / 2; dish.position.z = 0.36;        // lookAt() points +z at the Earth
+    g.add(dish);
+    g.userData.body = body;
     g.visible = false;
     scene.add(g);
     return g;
   });
-  const sightLines = SAT_COLORS.map((c) => {
-    const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: c }));
-    l.frustumCulled = false; l.visible = false; scene.add(l); return l;
-  });
-  const ARC_N = 129;
-  const arcMat = new LineMaterial({ color: 0x1d1d1f, linewidth: 2.5, transparent: true, opacity: 0.85, depthTest: false });
-  const arcs = Array.from({ length: 10 }, () => {
-    const l = new Line2(new LineGeometry(), arcMat);
-    l.renderOrder = 5;
-    l.frustumCulled = false; l.visible = false; scene.add(l); return l;
-  });
-  let curveMesh = null;
-  const curveMat = new THREE.MeshBasicMaterial({ color: ORANGE });
-  const curveGhost = new THREE.MeshBasicMaterial({ color: ORANGE, transparent: true, opacity: 0.3, depthTest: false });
-
-  // ── State ──
-  const st = {
-    mode: 'intro', step: 0, prog: 0, t: 6, ids: [], idsFor: null,
-    lab: { n: 4, clockMs: 0.3, noise: 0, iono: 0, lat: STORY_LAT, spheres: true, move: true },
-    seed: 1, noiseSeed: 1,
-  };
-  world.visible = false;
-
-  function pickSatellites(P, B, positions, n) {
-    const vis = CONST.map((s, i) => {
-      const [e, nn, u] = ecefToEnu(sub(positions[i], P), B);
-      const r = Math.hypot(e, nn, u);
-      return { id: s.id, pos: positions[i], az: ((Math.atan2(e, nn) / DEG) + 360) % 360, el: Math.asin(u / r) / DEG };
-    }).filter((q) => q.el > MASK);
-    const key = `${n}`;
-    if (st.idsFor === key && st.ids.length && st.ids.every((id) => vis.some((q) => q.id === id))) {
-      return { vis, used: st.ids.map((id) => vis.find((q) => q.id === id)) };
-    }
-    let used;
-    if (n === 'all' || n >= vis.length) used = vis.slice();
-    else {
-      // the 4 visible satellites with the best geometry (lowest GDOP), then add the best extras
-      let best = null;
-      const rec = (start, acc) => {
-        if (acc.length === 4) { const d = dopFromSky(acc); if (d.ok && (!best || d.gdop < best.g)) best = { g: d.gdop, set: [...acc] }; return; }
-        for (let i = start; i < vis.length; i++) { acc.push(vis[i]); rec(i + 1, acc); acc.pop(); }
-      };
-      rec(0, []);
-      used = best ? best.set : vis.slice(0, 4);
-      while (used.length < n) {
-        let pick = null;
-        for (const q of vis) if (!used.includes(q)) { const d = dopFromSky([...used, q]); if (d.ok && (!pick || d.gdop < pick.g)) pick = { g: d.gdop, q }; }
-        if (!pick) break;
-        used.push(pick.q);
-      }
-      used.sort((a, b) => a.az - b.az);
-      if (n === 3) used = used.slice(0, 3);
-    }
-    st.ids = used.map((q) => q.id);
-    st.idsFor = key;
-    return { vis, used };
+  const lineMats = [];
+  const fat = (color, width, opts = {}) => { const m = new LineMaterial({ color, linewidth: width, transparent: true, opacity: 0, ...opts }); lineMats.push(m); return m; };
+  const orbitMat = fat(0x9aa3ae, 1);
+  const orbits = [];
+  for (let p = 0; p < 6; p++) {
+    const pts = [];
+    for (let k = 0; k <= 180; k++) { const v = toV(satPos({ raan: p * 60 * DEG, u0: 0 }, (k / 180) * PERIOD)); pts.push(v.x, v.y, v.z); }
+    const geo = new LineGeometry(); geo.setPositions(pts);
+    const l = new Line2(geo, orbitMat); l.visible = false; scene.add(l); orbits.push(l);
   }
 
-  // Everything the picture and the text need, for the current mode/step.
-  function compute() {
-    const lat = st.mode === 'lab' ? st.lab.lat : STORY_LAT;
-    const P = llaToEcef(lat, LON), B = enuBasis(lat, LON);
-    const positions = CONST.map((s) => satPos(s, st.t));
-    const out = { P, B, positions, lat };
-    let n, trueClockMs = 0, correction = 1, extra = {};
-    if (st.mode === 'lab') {
-      n = st.lab.n;
-      trueClockMs = st.lab.clockMs;
-    } else {
-      const s = st.step, p = st.prog;
-      const ramp = (x) => { const v = Math.min(1, Math.max(0, (x - 0.12) / 0.66)); return v * v * (3 - 2 * v); };
-      n = s <= 1 ? 0 : s <= 3 ? 1 : s <= 5 ? 3 : s === 6 ? 4 : 'all';
-      trueClockMs = s < 5 ? 0 : s === 5 ? CLOCK_MS * ramp(p) : CLOCK_MS;
-      correction = s < 6 ? 0 : s === 6 ? ramp(p) : 1;
-    }
-    out.trueClockMs = trueClockMs;
-    if (n === 0) { out.vis = []; out.used = []; out.meas = []; return out; }
-    // in the story the first satellite chosen for steps 2–3 is S1 of the four
-    const pickN = n === 'all' ? 'all' : st.mode === 'lab' ? n : Math.max(4, n);
-    const { vis, used: chosen } = pickSatellites(P, B, positions, pickN);
-    const used = n === 'all' || st.mode === 'lab' ? chosen : chosen.slice(0, n);
-    out.vis = vis; out.used = used;
-    if (st.mode === 'lab') {
-      const g = gaussianSource(st.noiseSeed);
-      for (const q of used) extra[q.id] = st.lab.noise * g() + st.lab.iono * slantFactor(q.el);
-    }
-    const meas = measure({ truePos: P, clockError: trueClockMs / 1000, sats: used.map((q) => ({ id: q.id, pos: q.pos })), extra });
-    out.meas = meas;
-    if (meas.length >= 4) {
-      const fix = solveFix(meas);
-      out.fix = fix;
-      out.solvedClock = fix.ok ? fix.clock : 0;
-    }
-    // The receiver's current clock estimate (metres of range). In step 6 of the story we show it being
-    // adjusted from 0 to the solved value; everywhere else it is the solver's answer (or 0 with 3 satellites).
-    const est = meas.length >= 4 ? (out.solvedClock ?? 0) * correction : 0;
-    out.est = est;
-    if (meas.length === 3 || (st.mode === 'story' && st.step === 6)) {
-      const m = meas.slice(0, 3);
-      const hit = sphereIntersections(m[0].sat, m[0].pr - est, m[1].sat, m[1].pr - est, m[2].sat, m[2].pr - est);
-      out.answer = hit ? (norm(hit[0]) < norm(hit[1]) ? hit[0] : hit[1]) : null;
-      out.curveFor = m;
-    } else if (out.fix && out.fix.ok) out.answer = out.fix.pos;
-    if (meas.length === 1) out.answer = null;
-    if (out.answer) out.off = norm(sub(out.answer, P));
-    if (meas.length >= 4) out.dop = dopFromSky(used);
-    return out;
+  // ── You, the phone's answer, the signal ──
+  const spriteOf = (color, size, order) => { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: dotTexture(color), depthTest: false, sizeAttenuation: false, transparent: true })); s.scale.set(size, size, 1); s.renderOrder = order; scene.add(s); return s; };
+  const youDot = spriteOf('#0a84ff', 0.045, 8);
+  const ansDot = spriteOf(ORANGE, 0.04, 9);
+  const pulse = spriteOf('#ffcc00', 0.03, 7);
+
+  // ── Lines and spheres ──
+  const sight = SAT_COLORS.map((c) => { const l = new Line2(new LineGeometry(), fat(c, 1.6)); l.visible = false; scene.add(l); return l; });
+  const arcs = Array.from({ length: 6 }, () => { const l = new Line2(new LineGeometry(), fat(0x2c2c2e, 2.2, { depthTest: false })); l.renderOrder = 6; l.visible = false; scene.add(l); return l; });
+  const sphereGeo = new THREE.SphereGeometry(1, 96, 64);
+  const spheres = SAT_COLORS.slice(0, 4).map((c) => { const m = new THREE.Mesh(sphereGeo, glassMaterial(c)); m.visible = false; scene.add(m); return m; });
+  const curveMat = new THREE.MeshStandardMaterial({ color: ORANGE, emissive: ORANGE, emissiveIntensity: 0.35, transparent: true, opacity: 0 });
+  const curveGhostMat = new THREE.MeshBasicMaterial({ color: ORANGE, transparent: true, opacity: 0, depthTest: false });
+  let curveGroup = null, curveFor = '';
+  function setCurve(points, key) {
+    if (key === curveFor) return;
+    curveFor = key;
+    if (curveGroup) { scene.remove(curveGroup); curveGroup.children[0].geometry.dispose(); curveGroup = null; }
+    const pts = points.map((q) => toV(q.p)).filter((v) => v.length() < 26);
+    if (pts.length < 4) return;
+    const tube = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), Math.min(500, pts.length * 2), 0.024, 8, false);
+    curveGroup = new THREE.Group();
+    curveGroup.add(new THREE.Mesh(tube, curveMat));
+    const ghost = new THREE.Mesh(tube, curveGhostMat); ghost.renderOrder = 4; curveGroup.add(ghost);
+    scene.add(curveGroup);
   }
 
-  // ── Drawing the computed state ──
-  let curveKey = '', curveBuilt = 0;
-  function draw(o) {
-    const story = st.mode === 'story', s = st.step;
-    const youV = toV(o.P);
-    you.position.copy(youV.clone().multiplyScalar((R + 0.26) / R)); // sit on top of the blocks
-    you.visible = st.mode !== 'intro';
-    const showSats = st.mode === 'lab' || (story && s >= 1);
-    orbits.visible = showSats && !(story && s >= 4 && s <= 6);
-    const usedIdx = new Map(o.used ? o.used.map((q, k) => [q.id, k]) : []);
+  // ── Labels: crisp HTML tags that follow points in the scene ──
+  const tags = new Map();
+  function showTag(key, text, pos, alpha = 1, { below = false, cls = '', always = false } = {}) {
+    if (!tags.has(key)) { const el = document.createElement('div'); el.className = 'tag'; labelLayer.append(el); tags.set(key, { el, text: null, cls: null, pos: new THREE.Vector3() }); }
+    const t = tags.get(key);
+    if (t.text !== text) { t.el.textContent = text; t.text = text; }
+    if (t.cls !== cls) { t.el.className = `tag ${cls}`; t.cls = cls; }
+    t.pos.copy(pos); t.alpha = alpha; t.below = below; t.always = always; t.used = true;
+  }
+  const tmp = new THREE.Vector3(), rayD = new THREE.Vector3();
+  function placeTags(fade) {
+    for (const t of tags.values()) {
+      const a = (t.used ? t.alpha : 0) * fade;
+      t.used = false;
+      if (a < 0.02) { t.el.style.opacity = 0; continue; }
+      // hidden if the Earth is in the way
+      rayD.subVectors(t.pos, camera.position);
+      const L = rayD.length(); rayD.divideScalar(L);
+      const b = camera.position.dot(rayD), c = camera.position.lengthSq() - (R * 0.99) ** 2;
+      const disc = b * b - c;
+      const hit = !t.always && disc > 0 && -b - Math.sqrt(disc) > 0 && -b - Math.sqrt(disc) < L - 0.05;
+      tmp.copy(t.pos).project(camera);
+      if (hit || tmp.z > 1) { t.el.style.opacity = 0; continue; }
+      const x = (tmp.x * 0.5 + 0.5) * W, y = (-tmp.y * 0.5 + 0.5) * H;
+      t.el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, ${t.below ? '16px' : 'calc(-100% - 16px)'})`;
+      t.el.style.opacity = a.toFixed(3);
+    }
+  }
+
+  // ── The story's set-up: you, the four satellites that matter, and the rest ──
+  const story = (() => {
+    const P = llaToEcef(STORY_LAT, LON), B = enuBasis(STORY_LAT, LON);
+    const positions = CONST.map((s) => satPos(s, STORY_T));
+    const vis = skyOf(P, B, positions);
+    const four = bestSet(vis, 4);
+    const extras = vis.filter((q) => !four.includes(q));
+    const geo = measure({ truePos: P, clockError: 0, sats: four.map((q) => ({ id: q.id, pos: q.pos })) });
+    const curve = solutionCurve3D(geo[0], geo[1], geo[2], -4.5e6, 4.5e6, 700, [0, 0, 0]);
+    // the direction the orange curve runs through you (so the camera can look at it side-on)
+    const near = curve.reduce((a, q) => (Math.abs(q.bias) < Math.abs(a.bias) ? q : a));
+    const step = curve.find((q) => q.bias > near.bias + 2e5) || curve[curve.length - 1];
+    return { P, B, positions, four, extras, curve, along: toV(step.p).sub(toV(near.p)).normalize() };
+  })();
+
+  // ── Camera: where it is at each step of the story ──
+  const KEYS = (() => {
+    const you = toV(story.P), up = you.clone().normalize();
+    const east = toDir(story.B.e), north = toDir(story.B.n);
+    const s1 = toV(story.four[0].pos);
+    const O = new THREE.Vector3();
+    const around = (dist, u, e, n) => ({ target: O.clone(), pos: up.clone().multiplyScalar(u).add(east.clone().multiplyScalar(e)).add(north.clone().multiplyScalar(n)).normalize().multiplyScalar(dist) });
+    const above = (h) => ({ target: you.clone(), pos: you.clone().add(up.clone().multiplyScalar(h)).add(north.clone().multiplyScalar(-h * 0.35)) });
+    let close = up.clone().multiplyScalar(0.25).add(east.clone().multiplyScalar(0.8)).add(north.clone().multiplyScalar(-0.5)).normalize();
+    close.sub(story.along.clone().multiplyScalar(close.dot(story.along))).normalize().add(up.clone().multiplyScalar(0.95)).normalize();
+    const nearYou = (d) => ({ target: you.clone(), pos: you.clone().add(close.clone().multiplyScalar(d)) });
+    const perp = new THREE.Vector3().subVectors(s1, you).cross(up).normalize();
+    const mid = (f) => you.clone().lerp(s1, f);
+    return [
+      [1.4, above(1.6)],                                                                               // just above you as the city fades
+      [2.4, around(25, 0.9, 0.32, -0.28)],                                                             // the whole Earth, you near the middle
+      [3.4, around(80, 0.8, 0.45, -0.3)],                                                              // the constellation
+      [4.4, { target: mid(0.5), pos: mid(0.5).add(perp.clone().multiplyScalar(40)).add(up.clone().multiplyScalar(12)) }],  // one satellite and you
+      [5.4, { target: mid(0.3), pos: mid(0.3).add(perp.clone().multiplyScalar(70)).add(up.clone().multiplyScalar(18)) }], // its sphere
+      [6.45, nearYou(13)],                                                                             // three spheres meet
+      [7.4, nearYou(6.5)],                                                                             // a wrong clock
+      [8.6, nearYou(6.5)],                                                                             // the fourth satellite
+      [9.45, around(54, 0.85, 0.4, -0.35)],                                                            // many satellites
+      [10.2, above(1.4)],                                                                              // back down to the car
+    ];
+  })();
+  const offA = new THREE.Vector3(), offB = new THREE.Vector3();
+  function cameraAt(g, outPos, outTarget) {
+    let i = 0;
+    while (i < KEYS.length - 2 && g > KEYS[i + 1][0]) i++;
+    const [ta, a] = KEYS[i], [tb, b] = KEYS[i + 1];
+    const f = ramp(g, ta, tb);
+    outTarget.lerpVectors(a.target, b.target, f);
+    // glide: blend the viewing direction and the zoom (distance on a log scale)
+    offA.subVectors(a.pos, a.target); offB.subVectors(b.pos, b.target);
+    const da = offA.length(), db = offB.length();
+    const dir = offA.normalize().lerp(offB.normalize(), f).normalize();
+    outPos.copy(outTarget).add(dir.multiplyScalar(Math.exp(Math.log(da) + (Math.log(db) - Math.log(da)) * f)));
+  }
+
+  // ── The story at scroll position g ──
+  function storyFrame(g) {
+    const you = toV(story.P);
+    const four = story.four;
+    const trueClock = CLOCK_MS * ramp(g, 7.12, 7.75);           // the phone's clock drifts…
+    const meas = measure({ truePos: story.P, clockError: trueClock / 1000, sats: four.map((q) => ({ id: q.id, pos: q.pos })) });
+    const fix = solveFix(meas);
+    const est = (fix.ok ? fix.clock : 0) * ramp(g, 8.15, 8.65);  // …and the fourth satellite lets it solve for it
+    const hit = sphereIntersections(meas[0].sat, meas[0].pr - est, meas[1].sat, meas[1].pr - est, meas[2].sat, meas[2].pr - est);
+    const answer = hit ? (norm(hit[0]) < norm(hit[1]) ? hit[0] : hit[1]) : story.P;
+    const off = norm(sub(answer, story.P));
+
+    // satellites: the whole constellation only while step 4 is on screen; then only the ones that matter
+    const constA = band(g, 2.6, 3.0, 3.75, 4.1);
+    const show = [ramp(g, 3.8, 4.15), ramp(g, 5.8, 6.05), ramp(g, 5.9, 6.15), ramp(g, 7.9, 8.15)];
+    const extraA = band(g, 9.0, 9.3, 9.85, 10.1);
+    const keep = 1 - ramp(g, 9.85, 10.1);
+    const usedIdx = new Map(four.map((q, k) => [q.id, k]));
+    const extraIds = new Set(story.extras.map((q) => q.id));
     CONST.forEach((c, i) => {
-      const g = sats[i];
-      g.visible = showSats;
-      g.position.copy(toV(o.positions[i]));
-      g.lookAt(0, 0, 0);
       const k = usedIdx.get(c.id);
-      g.userData.body.material.color.set(k === undefined ? 0xf2c14e : SAT_COLORS[k]);
-      g.scale.setScalar(k === undefined ? 0.8 : 1.2);
-      setLabel(g.userData.label, k === undefined ? '' : `S${k + 1}`, k === undefined ? INK : SAT_COLORS[k]);
+      const a = Math.max(constA * 0.85, k !== undefined ? show[k] * keep : extraIds.has(c.id) ? extraA : 0);
+      placeSat(i, story.positions[i], a, k !== undefined && show[k] > 0.2 ? SAT_COLORS[k] : null);
     });
+    orbitMat.opacity = constA * 0.5;
+    orbits.forEach((l) => { l.visible = constA > 0.01; });
+    four.forEach((q, k) => { if (show[k] > 0.3) showTag(`s${k}`, `S${k + 1}`, toV(q.pos).add(toV(q.pos).normalize().multiplyScalar(0.9)), show[k] * (1 - ramp(g, 9.0, 9.3)), { cls: `c${k}` }); });
+
     // lines of sight
-    sightLines.forEach((l, k) => {
-      const q = o.used && o.used[k];
-      l.visible = !!q;
-      if (q) { l.geometry.attributes.position.setXYZ(0, youV.x, youV.y, youV.z); const sv = toV(q.pos); l.geometry.attributes.position.setXYZ(1, sv.x, sv.y, sv.z); l.geometry.attributes.position.needsUpdate = true; }
+    sight.forEach((l, k) => {
+      const q = k < 4 ? four[k] : story.extras[k - 4];
+      const a = k < 4 ? show[k] * keep * (0.9 - 0.4 * ramp(g, 9.0, 9.3)) : (q ? extraA * 0.55 : 0);
+      setLine(l, q ? [you, toV(q.pos)] : null, a);
     });
-    // spheres of distance, corrected by the receiver's clock estimate
-    const nSph = story ? (s === 3 ? 1 : s === 4 || s === 5 ? 3 : s === 6 ? 4 : 0) : st.lab.spheres && o.meas.length <= 6 ? o.meas.length : 0;
-    spheres.forEach((g, k) => {
-      const m = o.meas && o.meas[k];
-      g.visible = k < nSph && !!m;
-      if (g.visible) { g.position.copy(toV(m.sat)); g.scale.setScalar((m.pr - o.est) / U); g.children[0].material.opacity = story && s === 3 ? 0.12 : 0.07; }
+
+    // the signal travelling from S1 to you
+    const pulseA = band(g, 4.05, 4.3, 4.85, 5.05);
+    pulse.visible = pulseA > 0.01;
+    if (pulse.visible) { pulse.position.lerpVectors(toV(four[0].pos), you, (performance.now() / 1600) % 1); pulse.material.opacity = pulseA; }
+
+    // spheres grow out from each satellite until they reach you: the signal's trip
+    const grow = [ramp(g, 5.05, 5.7), ramp(g, 6.05, 6.5), ramp(g, 6.15, 6.6), ramp(g, 7.95, 8.2)];
+    const sphA = (1 - 0.72 * ramp(g, 6.4, 6.9)) * (1 - ramp(g, 8.95, 9.3));
+    spheres.forEach((m, k) => {
+      const r = ((meas[k].pr - est) / U) * grow[k];
+      m.visible = grow[k] > 0.001 && sphA > 0.01;
+      m.position.copy(toV(four[k].pos)); m.scale.setScalar(Math.max(r, 0.001));
+      m.material.uniforms.opacity.value = sphA * (k === 0 && g < 6 ? 1.0 : 0.85);
     });
-    // where pairs of spheres meet: arcs near the answer
-    const showArcs = story ? s >= 4 && s <= 6 : o.meas.length <= 5 && st.lab.spheres;
-    let a = 0;
-    const focus = o.answer || o.P;
-    if (showArcs && o.meas.length >= 2) {
-      const ms = o.meas.slice(0, story ? (s === 6 ? 4 : 3) : 5);
-      for (let i = 0; i < ms.length; i++) for (let j = i + 1; j < ms.length; j++) {
-        if (a >= arcs.length) break;
-        if (setArc(arcs[a], ms[i].sat, ms[i].pr - o.est, ms[j].sat, ms[j].pr - o.est, focus, 2.6e6)) a++;
-      }
-    }
-    arcs.forEach((l, k) => { l.visible = k < a; });
-    // the curve of every place that fits three satellites (one point per clock guess)
-    const showCurve = story ? s === 5 || s === 6 : o.meas.length === 3;
-    if (showCurve && o.curveFor) {
-      const key = o.curveFor.map((m) => `${m.id}:${Math.round(m.sat[0])}:${Math.round(m.pr - (o.trueClockMs / 1000) * C)}`).join('|');
-      if (key !== curveKey && performance.now() - curveBuilt > 160) {
-        curveKey = key;
-        curveBuilt = performance.now();
-        if (curveMesh) { scene.remove(curveMesh); curveMesh.geometry.dispose(); }
-        const [m1, m2, m3] = o.curveFor;
-        const b = (o.trueClockMs / 1000) * C;
-        const pts = solutionCurve3D(m1, m2, m3, b - 4.5e6, b + 4.5e6, 600, [0, 0, 0]).map((q) => toV(q.p)).filter((v) => v.length() < 28);
-        if (pts.length > 4) {
-          const tube = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), Math.min(600, pts.length * 2), 0.028, 6, false);
-          curveMesh = new THREE.Group();
-          curveMesh.add(new THREE.Mesh(tube, curveMat));
-          const ghost = new THREE.Mesh(tube, curveGhost); ghost.renderOrder = 4; curveMesh.add(ghost);
-          curveMesh.geometry = tube;
-          scene.add(curveMesh);
-        } else curveMesh = null;
-      }
-      if (curveMesh) curveMesh.visible = true;
-    } else if (curveMesh) curveMesh.visible = false;
-    // the answer
-    const showAnswer = !!o.answer && (story ? s >= 4 : true);
-    answer.visible = showAnswer;
-    if (showAnswer) {
-      answer.position.copy(toV(o.answer));
-      setLabel(answerLabel, o.off > 2000 ? `phone’s answer · ${fmtKm(o.off)} off` : '', ORANGE);
-      answerLabel.position.set(0, 0, 0);
-    }
-    setLabel(youLabel, answer.visible && o.off <= 2000 ? 'You = phone’s answer' : 'You', INK);
-    // the signal pulse and the distance label (steps 2–3)
-    const q1 = o.used && o.used[0];
-    pulse.visible = story && s === 2 && !!q1;
-    distLabel.visible = story && s === 3 && !!q1;
-    if (q1 && (pulse.visible || distLabel.visible)) {
-      const sv = toV(q1.pos);
-      if (pulse.visible) { const f = (performance.now() / 1400) % 1; pulse.position.lerpVectors(sv, youV, f); }
-      if (distLabel.visible) { distLabel.position.lerpVectors(sv, youV, 0.5); setLabel(distLabel, fmtKm(o.meas[0].pr), INK); }
-    }
+    if (g > 5.05 && g < 6.2) showTag('dist', fmtKm(meas[0].pr * grow[0]), you.clone().lerp(toV(four[0].pos), 0.5), ramp(g, 5.1, 5.3) * (1 - ramp(g, 5.95, 6.15)));
+
+    // where pairs of spheres meet: lines through the answer
+    const arcA = ramp(g, 6.4, 6.7) * (1 - ramp(g, 8.95, 9.25));
+    const pairs = [[0, 1], [0, 2], [1, 2], [0, 3], [1, 3], [2, 3]];
+    pairs.forEach(([i, j], n) => {
+      const a = arcA * (j === 3 ? ramp(g, 8.05, 8.2) : 1) * Math.min(grow[i], grow[j]);
+      setArc(arcs[n], meas[i].sat, meas[i].pr - est, meas[j].sat, meas[j].pr - est, answer, 2.4e6, a);
+    });
+
+    // the orange curve: every place that fits three signals
+    const curveA = ramp(g, 7.2, 7.5) * (1 - ramp(g, 8.95, 9.25));
+    curveMat.opacity = curveA; curveGhostMat.opacity = curveA * 0.3;
+    if (curveGroup) curveGroup.visible = curveA > 0.01;
+
+    // you and the phone's answer
+    youDot.position.copy(you); youDot.material.opacity = 1;
+    const ansA = ramp(g, 6.45, 6.7) * (1 - ramp(g, 9.0, 9.3));
+    ansDot.visible = ansA > 0.01 && off > 2000;
+    ansDot.position.copy(toV(answer)); ansDot.material.opacity = ansA;
+    showTag('you', off <= 2000 && ansA > 0.5 ? 'You = phone’s answer' : 'You', you, ramp(g, 1.9, 2.2) * keep, { cls: 'blue' });
+    if (ansDot.visible) showTag('ans', `phone’s answer · ${fmtKm(off)} off`, toV(answer), ansA, { below: true, cls: 'orange', always: true });
+
+    onReadout({ mode: 'story', t1: meas[0].pr / C, d1: meas[0].pr, trueClockMs: trueClock, estMs: (est / C) * 1000, off });
   }
 
+  // ── The lab ──
+  const lab = { n: 4, clockMs: 0.3, noise: 0, iono: 0, lat: STORY_LAT, spheres: false, move: false, ids: null, bunched: false, t: STORY_T, seed: 1 };
+  let labView = null;
+  function labFrame() {
+    const P = llaToEcef(lab.lat, LON), B = enuBasis(lab.lat, LON);
+    const you = toV(P);
+    const positions = CONST.map((s) => satPos(s, lab.t));
+    const vis = skyOf(P, B, positions);
+    let used;
+    if (lab.ids) used = lab.ids.map((id) => vis.find((q) => q.id === id)).filter(Boolean);
+    else used = lab.bunched ? bunchedSet(vis) : bestSet(vis, lab.n);
+    used.sort(byAz);
+    labView = { vis, used };
+    const g = gaussianSource(lab.seed);
+    const extra = {};
+    for (const q of used) extra[q.id] = lab.noise * g() + lab.iono * slantFactor(q.el);
+    const meas = measure({ truePos: P, clockError: lab.clockMs / 1000, sats: used.map((q) => ({ id: q.id, pos: q.pos })), extra });
+    let answer = null, fix = null, est = 0;
+    if (meas.length >= 4) { fix = solveFix(meas); if (fix.ok) { answer = fix.pos; est = fix.clock; } }
+    else if (meas.length === 3) {
+      const hit = sphereIntersections(meas[0].sat, meas[0].pr, meas[1].sat, meas[1].pr, meas[2].sat, meas[2].pr);
+      if (hit) answer = norm(hit[0]) < norm(hit[1]) ? hit[0] : hit[1];
+      const b = (lab.clockMs / 1000) * C;
+      setCurve(solutionCurve3D(meas[0], meas[1], meas[2], b - 4.5e6, b + 4.5e6, 600, [0, 0, 0]), meas.map((m) => `${m.id}:${Math.round(m.pr)}`).join('|'));
+    }
+    // only the satellites above your horizon: coloured if used, small and grey if not (click to add)
+    const usedIdx = new Map(used.map((q, k) => [q.id, k]));
+    const visIds = new Set(vis.map((q) => q.id));
+    CONST.forEach((c, i) => {
+      const k = usedIdx.get(c.id);
+      placeSat(i, positions[i], k !== undefined ? 1 : visIds.has(c.id) ? 0.45 : 0, k !== undefined ? SAT_COLORS[k % SAT_COLORS.length] : null);
+    });
+    orbits.forEach((l) => { l.visible = false; });
+    used.forEach((q, k) => showTag(`s${k}`, `S${k + 1}`, toV(q.pos).add(toV(q.pos).normalize().multiplyScalar(0.9)), 1, { cls: `c${k % 8}` }));
+    sight.forEach((l, k) => setLine(l, used[k] ? [you, toV(used[k].pos)] : null, used[k] ? 0.75 : 0));
+    spheres.forEach((m, k) => {
+      m.visible = lab.spheres && k < meas.length && meas.length <= 4;
+      if (m.visible) { m.position.copy(toV(meas[k].sat)); m.scale.setScalar((meas[k].pr - est) / U); m.material.uniforms.opacity.value = 0.6; }
+    });
+    const pairs = [[0, 1], [0, 2], [1, 2], [0, 3], [1, 3], [2, 3]];
+    pairs.forEach(([i, j], n) => {
+      const on = lab.spheres && meas.length <= 4 && meas[i] && meas[j];
+      setArc(arcs[n], on ? meas[i].sat : null, on ? meas[i].pr - est : 0, on ? meas[j].sat : null, on ? meas[j].pr - est : 0, answer || P, 2.4e6, on ? 1 : 0);
+    });
+    curveMat.opacity = meas.length === 3 ? 1 : 0; curveGhostMat.opacity = meas.length === 3 ? 0.3 : 0;
+    if (curveGroup) curveGroup.visible = meas.length === 3;
+    pulse.visible = false;
+    youDot.position.copy(you); youDot.material.opacity = 1;
+    const off = answer ? norm(sub(answer, P)) : NaN;
+    ansDot.visible = !!answer && off > 2000;
+    if (answer) { ansDot.position.copy(toV(answer)); ansDot.material.opacity = 1; }
+    showTag('you', answer && off <= 2000 ? 'You = phone’s answer' : 'You', you, 1, { cls: 'blue' });
+    if (ansDot.visible) showTag('ans', `phone’s answer · ${fmtKm(off)} off`, toV(answer), 1, { below: true, cls: 'orange', always: true });
+    const dop = meas.length >= 4 ? dopFromSky(used) : null;
+    onReadout({ mode: 'lab', n: meas.length, visible: vis.length, off, foundMs: fix && fix.ok ? (fix.clock / C) * 1000 : undefined, pdop: dop && dop.ok ? dop.pdop : undefined, custom: !!lab.ids, bunched: lab.bunched });
+  }
+
+  // Click a satellite in the lab to use it or drop it.
+  const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
+  let downAt = null;
+  function satUnder(e) {
+    const r = canvas.getBoundingClientRect();
+    ptr.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(ptr, camera);
+    const hits = ray.intersectObjects(sats.filter((s) => s.visible), true);
+    if (!hits.length) return null;
+    let o = hits[0].object;
+    while (o.parent && !sats.includes(o)) o = o.parent;
+    return CONST[sats.indexOf(o)];
+  }
+  canvas.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; });
+  canvas.addEventListener('pointerup', (e) => {
+    if (mode !== 'lab' || !downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5 || !labView) return;
+    const s = satUnder(e);
+    if (!s) return;
+    const ids = labView.used.map((q) => q.id);
+    const has = ids.includes(s.id);
+    lab.ids = has ? ids.filter((id) => id !== s.id) : [...ids, s.id];
+    lab.bunched = false;
+    onPick(lab.ids.length);
+  });
+  canvas.addEventListener('pointermove', (e) => { if (mode === 'lab' && !e.buttons) canvas.style.cursor = satUnder(e) ? 'pointer' : ''; });
+
+  // ── Drawing helpers ──
+  function placeSat(i, pos, a, tint) {
+    const g = sats[i];
+    g.visible = a > 0.01;
+    if (!g.visible) return;
+    g.position.copy(toV(pos));
+    g.lookAt(0, 0, 0);
+    g.scale.setScalar(0.25 + 0.85 * a);
+    const m = g.userData.body.material;
+    m.emissive.set(tint || '#000000');
+    m.emissiveIntensity = tint ? 0.55 : 0;
+  }
+  function setLine(l, pts, a) {
+    l.visible = !!pts && a > 0.01;
+    l.material.opacity = a;
+    if (!l.visible) return;
+    const k = `${pts[0].x.toFixed(3)},${pts[0].y.toFixed(3)},${pts[1].x.toFixed(3)},${pts[1].y.toFixed(3)}`;
+    if (l.userData.k !== k) { l.userData.k = k; l.geometry.dispose(); l.geometry = new LineGeometry(); l.geometry.setPositions([pts[0].x, pts[0].y, pts[0].z, pts[1].x, pts[1].y, pts[1].z]); }
+  }
   // The part of the circle where two spheres meet that lies near `focus`.
-  function setArc(line, c1, r1, c2, r2, focus, span) {
+  function setArc(line, c1, r1, c2, r2, focus, span, a) {
+    line.visible = false;
+    line.material.opacity = a;
+    if (!c1 || a < 0.01) return;
     const d = sub(c2, c1), dist = norm(d);
-    if (dist === 0) return false;
-    const a = (r1 * r1 - r2 * r2 + dist * dist) / (2 * dist);
-    const h2 = r1 * r1 - a * a;
-    if (h2 <= 0) return false;
+    const x = (r1 * r1 - r2 * r2 + dist * dist) / (2 * dist);
+    const h2 = r1 * r1 - x * x;
+    if (h2 <= 0 || !(dist > 0)) return;
     const h = Math.sqrt(h2), e = d.map((v) => v / dist);
-    const centre = c1.map((v, i) => v + a * e[i]);
+    const centre = c1.map((v, i) => v + x * e[i]);
     let f = sub(focus, centre);
-    const along = f[0] * e[0] + f[1] * e[1] + f[2] * e[2];
-    f = f.map((v, i) => v - along * e[i]);
-    let fn = norm(f);
-    let u = fn > 1 ? f.map((v) => v / fn) : [e[1], -e[0], 0];
-    if (fn <= 1) { const un = norm(u) || 1; u = u.map((v) => v / un); }
+    const al = f[0] * e[0] + f[1] * e[1] + f[2] * e[2];
+    f = f.map((v, i) => v - al * e[i]);
+    const fn = norm(f) || 1;
+    const u = f.map((v) => v / fn);
     const w = [e[1] * u[2] - e[2] * u[1], e[2] * u[0] - e[0] * u[2], e[0] * u[1] - e[1] * u[0]];
-    const half = Math.min(Math.PI, span / h);
-    const arr = new Float32Array(ARC_N * 3);
-    for (let k = 0; k < ARC_N; k++) {
-      const th = -half + (2 * half * k) / (ARC_N - 1);
+    const half = Math.min(Math.PI, span / h), N = 96, arr = new Float32Array(N * 3);
+    for (let k = 0; k < N; k++) {
+      const th = -half + (2 * half * k) / (N - 1);
       const p = centre.map((v, i) => v + h * (Math.cos(th) * u[i] + Math.sin(th) * w[i]));
       arr[3 * k] = p[0] / U; arr[3 * k + 1] = p[2] / U; arr[3 * k + 2] = -p[1] / U;
     }
     line.geometry.dispose();
     line.geometry = new LineGeometry();
     line.geometry.setPositions(arr);
-    return true;
+    line.visible = true;
   }
 
-  // ── Camera ──
-  const goal = { pos: new THREE.Vector3(14, 18, 60), target: new THREE.Vector3() };
-  function cameraGoal(o) {
-    const youV = toV(o.P);
-    const up = toDir(o.B.u), east = toDir(o.B.e), north = toDir(o.B.n);
-    const s = st.step;
-    if (st.mode === 'intro') { goal.target.set(0, 0, 0); goal.pos.set(Math.sin(performance.now() / 9000) * 34, 14, Math.cos(performance.now() / 9000) * 34); return; }
-    if (s === 0) { goal.target.set(0, 0, 0); goal.pos.copy(youV.clone().normalize().multiplyScalar(30).add(east.clone().multiplyScalar(-8)).add(new THREE.Vector3(0, 6, 0))); return; }
-    if (s === 1 || s >= 7) {
-      const spin = s >= 7 ? performance.now() / 16000 : 0;
-      goal.target.set(0, 0, 0);
-      const d = youV.clone().normalize().multiplyScalar(s >= 7 ? 58 : 78);
-      goal.pos.copy(d.applyAxisAngle(new THREE.Vector3(0, 1, 0), 0.5 + spin).add(new THREE.Vector3(0, 22, 0)));
-      return;
-    }
-    const q1 = o.used && o.used[0];
-    if ((s === 2 || s === 3) && q1) {
-      const sv = toV(q1.pos);
-      goal.target.copy(youV.clone().lerp(sv, s === 2 ? 0.45 : 0.3));
-      const side = new THREE.Vector3().subVectors(sv, youV).cross(up).normalize();
-      const back = s === 2 ? 30 : 58;
-      goal.pos.copy(goal.target.clone().add(side.multiplyScalar(back)).add(up.clone().multiplyScalar(back * 0.35)));
-      return;
-    }
-    // close-up around you and the phone's answer
-    const focus = o.answer ? youV.clone().lerp(toV(o.answer), 0.5) : youV.clone();
-    const sep = o.answer ? youV.distanceTo(toV(o.answer)) : 0;
-    const dist = Math.min(16, Math.max(W > 820 ? 7.5 : 9.5, sep * 3.2));
-    // look at the gap between you and the answer side-on, so it isn't foreshortened
-    let dir = up.clone().multiplyScalar(0.55).add(east.clone().multiplyScalar(0.7)).add(north.clone().multiplyScalar(-0.45)).normalize();
-    if (sep > 0.02) {
-      const d = toV(o.answer).sub(youV).normalize();
-      dir.sub(d.multiplyScalar(dir.dot(d))).normalize().add(up.clone().multiplyScalar(0.3)).normalize();
-    }
-    goal.target.copy(focus);
-    goal.pos.copy(focus.clone().add(dir.multiplyScalar(dist)));
-  }
-
-  // Keep the model clear of the text panel (left on wide screens, bottom on narrow ones).
-  let W = 1, H = 1;
+  // ── Size ──
+  let W = 1, H = 1, mode = 'intro';
   function applyOffset() {
     const wide = W > 820;
     let dx = 0, dy = 0;
-    if (st.mode === 'story') { if (wide) dx = -Math.min(230, W * 0.15); else dy = H * 0.17; }
-    if (st.mode === 'lab') { if (wide) dx = Math.min(190, W * 0.13); else dy = H * 0.2; }
+    if (mode === 'story') { if (wide) dx = -Math.min(230, W * 0.15); else dy = H * 0.16; }
+    if (mode === 'lab') { if (wide) dx = Math.min(210, W * 0.15); else dy = H * 0.24; }
     if (dx || dy) camera.setViewOffset(W, H, dx, dy, W, H); else camera.clearViewOffset();
   }
   function resize() {
     const r = canvas.getBoundingClientRect();
     W = Math.max(1, r.width); H = Math.max(1, r.height);
     renderer.setSize(W, H, false);
-    arcMat.resolution.set(W, H);
     camera.aspect = W / H;
     camera.updateProjectionMatrix();
     applyOffset();
+    for (const m of lineMats) m.resolution.set(W, H);
   }
   new ResizeObserver(resize).observe(canvas);
   resize();
 
-  // ── Loop ──
-  let last = performance.now(), lastReseed = 0, lastReadout = 0, dirty = true, cur = null;
-  function frame(now) {
-    requestAnimationFrame(frame);
+  // ── One frame (called by the page's animation loop) ──
+  let g = 0, alpha = 0, last = performance.now(), fly = null, lastSeed = 0;
+  const goalPos = new THREE.Vector3(), goalTarget = new THREE.Vector3(), look = new THREE.Vector3();
+  setCurve(story.curve, 'story');
+  function tick(now) {
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
-    const moving = (st.mode === 'story' && st.step <= 1) || (st.mode === 'lab' && st.lab.move);
-    if (moving && world.visible) { st.t += dt; dirty = true; }
-    // moving satellites with noise: draw fresh noise a few times a second, so the answer jitters like a real fix
-    if (st.mode === 'lab' && st.lab.move && st.lab.noise > 0 && now - lastReseed > 300) { st.noiseSeed++; lastReseed = now; }
-    if (dirty || (st.mode === 'story' && st.step === 2)) {
-      if (dirty) {
-        cur = compute();
-        dirty = false;
-        if (now - lastReadout > 120 || !moving) { onReadout(readout(cur)); lastReadout = now; }
-      }
-      draw(cur);
-    }
-    animateWorld(now);
-    if (cur) cameraGoal(cur);
-    if (st.mode === 'lab') controls.update();
-    else {
-      const k = STILL ? 1 : 1 - Math.exp(-dt * 2.6);
-      camera.position.lerp(goal.pos, k);
-      look.lerp(goal.target, k);
+    clouds.rotation.y += dt * 0.004;
+    if (alpha < 0.003) { placeTags(0); return; }
+    if (mode === 'story') {
+      storyFrame(g);
+      cameraAt(g, goalPos, goalTarget);
+      camera.position.copy(goalPos);
+      look.copy(goalTarget);
       camera.lookAt(look);
+    } else if (mode === 'lab') {
+      if (lab.move) { lab.t += dt; if (lab.noise > 0 && now - lastSeed > 300) { lab.seed++; lastSeed = now; } }
+      labFrame();
+      if (fly) {
+        const f = Math.min(1, (now - fly.t0) / 1000), e = f < 0.5 ? 2 * f * f : 1 - (-2 * f + 2) ** 2 / 2;
+        camera.position.lerpVectors(fly.from, fly.to, e);
+        controls.target.lerpVectors(fly.fromT, fly.toT, e);
+        if (f >= 1) fly = null;
+      }
+      controls.update();
     }
-    flipLabels();
+    sunLight.position.copy(camera.position).add(new THREE.Vector3(18, 26, 10));
+    placeTags(mode === 'story' ? clamp01((alpha - 0.5) * 2) : 1);
     renderer.render(scene, camera);
   }
-
-  // Keep labels on screen: centre each label over (you) or under (the answer) its point,
-  // nudged sideways if it would run off either edge.
-  const tmpV = new THREE.Vector3();
-  function flipLabels() {
-    for (const [obj, label, below] of [[you, youLabel, false], [answer, answerLabel, true]]) {
-      if (!obj.visible) continue;
-      tmpV.setFromMatrixPosition(obj.matrixWorld).project(camera);
-      const w = Math.max(1e-6, label.scale.x * camera.projectionMatrix.elements[0]); // on-screen width, in −1…1 units
-      let left = tmpV.x - w / 2;
-      left = Math.min(Math.max(left, -0.94), 0.9 - w);
-      label.center.set((tmpV.x - left) / w, below ? 1.45 : -0.5);
-    }
+  // Lab views: from space (you and every satellite you can hear), or close to you.
+  function labPose(which) {
+    const P = llaToEcef(lab.lat, LON), B = enuBasis(lab.lat, LON);
+    const you = toV(P), up = you.clone().normalize(), east = toDir(B.e), north = toDir(B.n);
+    if (which === 'you') return { pos: you.clone().add(up.clone().multiplyScalar(5).add(east.clone().multiplyScalar(3)).add(north.clone().multiplyScalar(-2.5))), target: you.clone() };
+    return { pos: up.clone().add(east.clone().multiplyScalar(0.5)).add(north.clone().multiplyScalar(-0.4)).normalize().multiplyScalar(82), target: you.clone().multiplyScalar(0.9) };
   }
-
-  function readout(o) {
-    const r = { mode: st.mode, step: st.step, n: o.meas ? o.meas.length : 0, trueClockMs: o.trueClockMs };
-    if (o.meas && o.meas[0]) { r.t1 = o.meas[0].pr / C; r.d1 = o.meas[0].pr; }
-    r.off = o.off;
-    if (o.fix && o.fix.ok) { r.foundMs = (o.fix.clock / C) * 1000; r.fixErr = norm(sub(o.fix.pos, o.P)); r.iterations = o.fix.iterations.length - 1; }
-    r.estMs = (o.est / C) * 1000;
-    if (o.dop && o.dop.ok) r.pdop = o.dop.pdop;
-    r.visible = o.vis ? o.vis.length : 0;
-    return r;
+  function labCamera(which) {
+    const p = labPose(which);
+    fly = { from: camera.position.clone(), to: p.pos, fromT: controls.target.clone(), toT: p.target, t0: performance.now() };
   }
-
-  // ── Labels drawn with the page's pixel font ──
-  function makeLabel(text = '', color = INK) {
-    const cv = document.createElement('canvas');
-    const tex = new THREE.CanvasTexture(cv);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.minFilter = THREE.LinearFilter;
-    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true, sizeAttenuation: false }));
-    sp.renderOrder = 10;
-    sp.userData = { cv, tex, text: null, color: null };
-    setLabel(sp, text, color);
-    return sp;
-  }
-  function setLabel(sp, text, color) {
-    if (sp.userData.text === text && sp.userData.color === color) return;
-    sp.userData.text = text; sp.userData.color = color;
-    const { cv } = sp.userData;
-    const ctx = cv.getContext('2d');
-    const font = '600 40px "Pixelify Sans", system-ui, sans-serif';
-    ctx.font = font;
-    const w = Math.max(8, Math.ceil(ctx.measureText(text).width) + 24);
-    if (cv.width !== w || cv.height !== 64) {
-      cv.width = w; cv.height = 64;
-      // a texture can't change size on the GPU: make a fresh one for the new canvas size
-      sp.material.map.dispose();
-      const fresh = new THREE.CanvasTexture(cv);
-      fresh.colorSpace = THREE.SRGBColorSpace;
-      fresh.minFilter = THREE.LinearFilter;
-      sp.material.map = fresh;
-      sp.userData.tex = fresh;
-      sp.material.needsUpdate = true;
-    }
-    const tex = sp.userData.tex;
-    ctx.font = font;
-    ctx.clearRect(0, 0, w, 64);
-    if (text) {
-      ctx.fillStyle = 'rgba(255,255,255,0.88)';
-      ctx.fillRect(0, 6, w, 52);
-      ctx.fillStyle = color;
-      ctx.textBaseline = 'middle';
-      ctx.fillText(text, 12, 34);
-    }
-    tex.needsUpdate = true;
-    const hgt = 0.038;
-    sp.scale.set((hgt * w) / 64, hgt, 1);
-    sp.visible = !!text;
-  }
-
-  requestAnimationFrame(frame);
 
   return {
-    generate(seed) {
-      st.seed = seed;
-      buildWorld(seed);
-      world.visible = true;
-      genStart = performance.now();
-      dirty = true;
+    tick,
+    setStory(gg, a) {
+      if (mode !== 'story') {
+        if (mode === 'lab') setCurve(story.curve, 'story');
+        mode = 'story'; controls.enabled = false; applyOffset();
+      }
+      g = gg; alpha = a;
     },
-    setStory(step, prog) {
-      const was = st.mode;
-      if (st.mode !== 'story') { st.mode = 'story'; controls.enabled = false; applyOffset(); }
-      if (step <= 1 && st.step > 1) st.idsFor = null;     // pick fresh satellites after they move again
-      if (was === 'lab') { st.idsFor = null; look.copy(controls.target); }
-      st.step = step; st.prog = prog;
-      dirty = true;
-    },
-    setLab(params) {
-      if (st.mode !== 'lab') {
-        st.mode = 'lab';
-        st.idsFor = null;
+    setLab(params = {}) {
+      if (mode !== 'lab') {
+        mode = 'lab'; alpha = 1;
         controls.enabled = true;
-        controls.target.copy(look);
+        const p = labPose('space');
+        controls.target.copy(p.target);
+        camera.position.copy(p.pos);
         applyOffset();
       }
-      Object.assign(st.lab, params);
-      if ('n' in params || 'lat' in params) st.idsFor = null;
-      dirty = true;
+      if ('n' in params) { lab.ids = null; lab.bunched = false; }
+      if (params.bunched) { lab.ids = null; }
+      if (params.reseed) lab.seed++;
+      delete params.reseed;
+      Object.assign(lab, params);
     },
-    reseedNoise() { st.noiseSeed++; dirty = true; },
+    labCamera,
   };
 }
 

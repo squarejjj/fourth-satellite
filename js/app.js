@@ -1,26 +1,41 @@
-// Page flow: home ("Generate World") → a scroll-through story with the model in the middle → the lab.
+// Page flow: home ("Generate World") → a scroll-through story → the lab.
+// One animation loop drives both 3-D scenes from a single number, g: how far you have scrolled,
+// counted in steps. It is smoothed, so the model glides even when the mouse wheel jumps.
 import { createScene } from './scene.js';
+import { createCity } from './city.js';
 
 const body = document.body;
-const KM_PER_MS = 299.792458; // light travels this many km in a millisecond
-const cards = [...document.querySelectorAll('.card')];
-const spaces = [...document.querySelectorAll('#track .space')];
+const KM_PER_MS = 299.792458;                     // light travels this many km in a millisecond
+const steps = [...document.querySelectorAll('.step')];
+const copies = steps.map((s) => s.querySelector('.copy'));
 const dotsNav = document.getElementById('dots');
 const hint = document.getElementById('hint');
+const cityCanvas = document.getElementById('city');
+const labelLayer = document.getElementById('labels');
+const STILL = new URLSearchParams(location.search).has('still') || matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+const clamp01 = (x) => Math.min(1, Math.max(0, x));
+const smooth = (t) => t * t * (3 - 2 * t);
+const ramp = (g, a, b) => smooth(clamp01((g - a) / (b - a)));
 const fmtInt = (x) => Math.round(x).toLocaleString('en-GB');
 const sign = (x) => (x < -0.0005 ? '−' : '+');
 function dist(m) {
   if (!Number.isFinite(m)) return '—';
-  if (m < 0.01) return '0 m';
+  if (m < 0.05) return '0 m';
   if (m < 1000) return `${m.toFixed(m < 10 ? 1 : 0)} m`;
   return m < 100000 ? `${(m / 1000).toFixed(1)} km` : `${fmtInt(m / 1000)} km`;
 }
-const setLive = (key, text) => document.querySelectorAll(`[data-live="${key}"]`).forEach((el) => { el.textContent = text; });
+const live = new Map();
+function setLive(key, text) {
+  if (live.get(key) === text) return;
+  live.set(key, text);
+  document.querySelectorAll(`[data-live="${key}"]`).forEach((el) => { el.textContent = text; });
+}
 
-let scene = null;
+let earth = null, city = null;
 try {
-  scene = createScene(document.getElementById('world'), { onReadout });
+  city = createCity(cityCanvas, { labelLayer });
+  earth = createScene(document.getElementById('world'), { labelLayer, onReadout, onPick });
 } catch (err) {
   console.error(err);
   document.getElementById('home-note').textContent = 'This page needs a browser with 3-D graphics (WebGL) switched on.';
@@ -29,85 +44,73 @@ try {
 
 // ── Home → story ──
 document.getElementById('generate').addEventListener('click', async () => {
-  try { await document.fonts.load('600 40px "Pixelify Sans"'); } catch { /* fall back to the system font */ }
+  try { await document.fonts.load('600 18px "Pixelify Sans"'); } catch { /* the system font will do */ }
   body.classList.replace('mode-intro', 'mode-story');
   window.scrollTo(0, 0);
-  scene.generate(Math.floor(Math.random() * 1e6)); // a new world every time, like a new seed
-  step = -1;
-  onScroll();
+  gShown = gFromScroll();
+  city.generate();
 });
 
-// ── Story: the page scrolls, the model stays put and changes ──
-spaces.forEach((sp, i) => {
+// ── Story ──
+steps.forEach((sp, i) => {
   const b = document.createElement('button');
   b.type = 'button';
-  b.setAttribute('aria-label', i < spaces.length - 1 ? `Step ${i + 1}` : 'Try it yourself');
-  b.addEventListener('click', () => window.scrollTo({ top: sp.offsetTop + (sp.offsetHeight > innerHeight * 1.2 ? sp.offsetHeight - innerHeight * 0.6 : 0), behavior: 'smooth' }));
+  b.setAttribute('aria-label', `Step ${i + 1}`);
+  b.addEventListener('click', () => window.scrollTo({ top: sp.offsetTop - innerHeight * 0.5 + sp.offsetHeight * 0.42, behavior: 'smooth' }));
   dotsNav.append(b);
 });
 const dots = [...dotsNav.children];
-let step = -1, ticking = false;
-addEventListener('scroll', () => {
-  if (ticking) return;
-  ticking = true;
-  requestAnimationFrame(() => { ticking = false; onScroll(); });
-}, { passive: true });
-addEventListener('resize', () => onScroll());
+document.getElementById('to-top').addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
 
-function onScroll() {
-  if (!scene || !body.classList.contains('mode-story')) return;
+// How far through the story the middle of the screen is, in steps.
+function gFromScroll() {
   const mid = innerHeight * 0.5;
-  let s = 0, p = 0;
-  spaces.forEach((sp, i) => {
-    const r = sp.getBoundingClientRect();
-    if (r.top <= mid) { s = i; p = Math.min(1, Math.max(0, (mid - r.top) / r.height)); }
+  let g = 0;
+  steps.forEach((s, i) => { const r = s.getBoundingClientRect(); if (r.top <= mid) g = i + clamp01((mid - r.top) / r.height); });
+  return Math.min(g, steps.length - 0.35);
+}
+// Text fades in as it arrives and out as it leaves.
+function fadeCopies() {
+  const vh = innerHeight;
+  copies.forEach((c) => {
+    const r = c.getBoundingClientRect();
+    // in from the bottom of the screen, out as it rises past the top quarter
+    const a = smooth(Math.min(clamp01((vh * 0.97 - r.top) / (vh * 0.28)), clamp01((r.top + vh * 0.02) / (vh * 0.18))));
+    c.style.opacity = a.toFixed(3);
   });
-  if (s !== step) {
-    step = s;
-    cards.forEach((c) => c.classList.toggle('on', +c.dataset.step === s));
-    dots.forEach((d, i) => d.classList.toggle('on', i === s));
-  }
-  hint.classList.toggle('gone', s > 0 || window.scrollY > 40);
-  scene.setStory(s, p);
 }
 
-// ── Lab ──
-const lab = { n: 4, clockMs: 0.3, noise: 0, iono: 0, lat: 37.5, spheres: true, move: true };
-document.getElementById('open-lab').addEventListener('click', () => {
-  body.classList.replace('mode-story', 'mode-lab');
-  window.scrollTo(0, 0);
-  scene.setLab(lab);
-  renderOutputs();
-});
-document.getElementById('back').addEventListener('click', () => {
-  body.classList.replace('mode-lab', 'mode-story');
-  step = -1;
-  requestAnimationFrame(() => { window.scrollTo(0, spaces[spaces.length - 1].offsetTop); onScroll(); });
-});
-document.querySelectorAll('#lab-n button').forEach((b) => b.addEventListener('click', () => {
-  lab.n = +b.dataset.n;
-  document.querySelectorAll('#lab-n button').forEach((q) => q.setAttribute('aria-pressed', String(q === b)));
-  scene.setLab({ n: lab.n });
-}));
-for (const [id, key] of [['lab-clock', 'clockMs'], ['lab-noise', 'noise'], ['lab-iono', 'iono'], ['lab-lat', 'lat']]) {
-  const el = document.getElementById(id);
-  el.addEventListener('input', () => { lab[key] = +el.value; renderOutputs(); scene.setLab({ [key]: lab[key] }); });
+// ── The loop ──
+let gShown = 0, last = performance.now(), activeDot = -1;
+function loop(now) {
+  requestAnimationFrame(loop);
+  const dt = Math.min(0.1, (now - last) / 1000);
+  last = now;
+  if (!earth) return;
+  if (body.classList.contains('mode-story')) {
+    const gTarget = gFromScroll();
+    gShown = STILL ? gTarget : gShown + (gTarget - gShown) * (1 - Math.exp(-dt * 6));
+    const cityA = clamp01(1 - ramp(gShown, 1.55, 2.05) + ramp(gShown, 9.75, 10.25));
+    cityCanvas.style.opacity = cityA.toFixed(3);
+    city.set(gShown, cityA);
+    earth.setStory(gShown, 1 - cityA);
+    city.tick(now);
+    earth.tick(now);
+    fadeCopies();
+    const d = Math.min(steps.length - 1, Math.floor(gTarget));
+    if (d !== activeDot) { activeDot = d; dots.forEach((b, i) => b.classList.toggle('on', i === d)); }
+    hint.classList.toggle('gone', window.scrollY > 40);
+  } else if (body.classList.contains('mode-lab')) {
+    earth.tick(now);
+  }
 }
-for (const [id, key] of [['lab-spheres', 'spheres'], ['lab-move', 'move']]) {
-  const el = document.getElementById(id);
-  el.addEventListener('change', () => { lab[key] = el.checked; scene.setLab({ [key]: lab[key] }); });
-}
-function renderOutputs() {
-  document.getElementById('o-clock').textContent = `${sign(lab.clockMs)}${Math.abs(lab.clockMs).toFixed(2)} ms`;
-  document.getElementById('o-noise').textContent = `${lab.noise} m`;
-  document.getElementById('o-iono').textContent = `${lab.iono} m`;
-  document.getElementById('o-lat').textContent = lab.lat === 0 ? 'equator' : `${Math.round(Math.abs(lab.lat))}°${lab.lat > 0 ? 'N' : 'S'}`;
-}
+requestAnimationFrame(loop);
 
 // ── Numbers from the model ──
 function onReadout(r) {
   if (r.mode === 'story') {
-    if (r.t1) { setLive('t1', `${r.t1.toFixed(4)} s`); setLive('d1', `${fmtInt(r.d1 / 1000)} km`); }
+    setLive('t1', `${r.t1.toFixed(4)} s`);
+    setLive('d1', `${fmtInt(r.d1 / 1000)} km`);
     setLive('clk', `${r.trueClockMs.toFixed(2)} ms`);
     setLive('km', `${fmtInt(r.trueClockMs * KM_PER_MS)} km`);
     setLive('off', dist(r.off));
@@ -115,18 +118,92 @@ function onReadout(r) {
     setLive('err', dist(r.off));
     return;
   }
-  if (r.mode !== 'lab') return;
-  const set = (id, text, cls = '') => { const el = document.getElementById(id); el.textContent = text; el.className = cls; };
-  set('r-count', r.n >= 4 ? `4 · ${r.n}` : `4 · ${r.n}`, r.n >= 4 ? 'good' : 'bad');
+  labReadout(r);
+}
+
+// ── Lab ──
+const DEFAULTS = { n: 4, clockMs: 0.3, noise: 0, iono: 0, lat: 37.5, spheres: false, move: false };
+const lab = { ...DEFAULTS };
+let savedScroll = 0, lead = '';
+const EXPERIMENTS = {
+  clock: { set: { n: 4, clockMs: 1, noise: 0, iono: 0 }, lead: 'The phone’s clock is now 1 ms off: 300 km on every distance. ' },
+  three: { set: { n: 3, clockMs: 0.5, noise: 0, iono: 0 }, lead: '' },
+  noise: { set: { n: 4, clockMs: 0.3, noise: 8, iono: 0, reseed: true }, lead: 'Each distance now has up to about 8 m of random error, like a real receiver. ' },
+  bunch: { set: { bunched: true, clockMs: 0.3, noise: 8, iono: 0, reseed: true }, lead: 'These four satellites sit close together in your sky, with the same 8 m of random error. ' },
+};
+document.getElementById('open-lab').addEventListener('click', () => {
+  savedScroll = window.scrollY;
+  body.classList.replace('mode-story', 'mode-lab');
+  earth.setLab({ ...lab });
+  syncControls();
+});
+document.getElementById('back').addEventListener('click', () => {
+  body.classList.replace('mode-lab', 'mode-story');
+  requestAnimationFrame(() => { window.scrollTo(0, savedScroll); gShown = gFromScroll(); });
+});
+document.getElementById('exps').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  const ex = EXPERIMENTS[b.dataset.exp];
+  Object.assign(lab, { ...ex.set, bunched: !!ex.set.bunched });
+  delete lab.reseed;
+  lead = ex.lead;
+  earth.setLab({ ...ex.set, bunched: !!ex.set.bunched });
+  document.querySelectorAll('#exps button').forEach((q) => q.setAttribute('aria-pressed', String(q === b)));
+  syncControls();
+});
+document.getElementById('reset').addEventListener('click', () => {
+  Object.assign(lab, DEFAULTS);
+  lead = '';
+  earth.setLab({ ...DEFAULTS, bunched: false });
+  document.querySelectorAll('#exps button').forEach((q) => q.setAttribute('aria-pressed', 'false'));
+  syncControls();
+});
+document.querySelectorAll('#lab-n button').forEach((b) => b.addEventListener('click', () => {
+  lab.n = +b.dataset.n; lab.bunched = false; lead = '';
+  earth.setLab({ n: lab.n, bunched: false });
+  clearExperiment();
+  syncControls();
+}));
+for (const [id, key] of [['lab-clock', 'clockMs'], ['lab-noise', 'noise'], ['lab-iono', 'iono'], ['lab-lat', 'lat']]) {
+  const el = document.getElementById(id);
+  el.addEventListener('input', () => { lab[key] = +el.value; lead = ''; clearExperiment(); earth.setLab({ [key]: lab[key] }); syncControls(); });
+}
+for (const [id, key] of [['lab-spheres', 'spheres'], ['lab-move', 'move']]) {
+  const el = document.getElementById(id);
+  el.addEventListener('change', () => { lab[key] = el.checked; earth.setLab({ [key]: lab[key] }); });
+}
+document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => earth.labCamera(b.dataset.view)));
+function clearExperiment() { document.querySelectorAll('#exps button').forEach((q) => q.setAttribute('aria-pressed', 'false')); }
+function onPick(count) {
+  lab.bunched = false; lead = '';
+  clearExperiment();
+  document.querySelectorAll('#lab-n button').forEach((q) => q.setAttribute('aria-pressed', String(+q.dataset.n === count)));
+}
+function syncControls() {
+  const set = (id, v) => { document.getElementById(id).value = v; };
+  set('lab-clock', lab.clockMs); set('lab-noise', lab.noise); set('lab-iono', lab.iono); set('lab-lat', lab.lat);
+  document.getElementById('lab-spheres').checked = lab.spheres;
+  document.getElementById('lab-move').checked = lab.move;
+  document.getElementById('o-clock').textContent = `${sign(lab.clockMs)}${Math.abs(lab.clockMs).toFixed(2)} ms`;
+  document.getElementById('o-noise').textContent = `${lab.noise} m`;
+  document.getElementById('o-iono').textContent = `${lab.iono} m`;
+  document.getElementById('o-lat').textContent = lab.lat === 0 ? 'equator' : `${Math.round(Math.abs(lab.lat))}°${lab.lat > 0 ? 'N' : 'S'}`;
+  document.querySelectorAll('#lab-n button').forEach((q) => q.setAttribute('aria-pressed', String(!lab.bunched && +q.dataset.n === lab.n)));
+}
+function labReadout(r) {
+  const set = (id, text, cls = '') => { const el = document.getElementById(id); if (el.textContent !== text) el.textContent = text; el.className = `v ${cls}`; };
   set('r-off', dist(r.off), r.off < 10 ? 'good' : r.off < 1000 ? 'warn' : 'bad');
   set('r-clock', r.n >= 4 && r.foundMs !== undefined ? `${sign(r.foundMs)}${Math.abs(r.foundMs).toFixed(3)} ms` : 'can’t tell', r.n >= 4 ? '' : 'bad');
-  set('r-dop', r.pdop ? r.pdop.toFixed(2) : '—');
+  set('r-count', `${r.n} of ${r.visible}`, r.n >= 4 ? '' : 'bad');
+  set('r-dop', r.pdop ? r.pdop.toFixed(1) : '—', r.pdop > 4 ? 'warn' : '');
   let note;
-  if (r.visible < lab.n) note = `Only ${r.visible} satellites are above the horizon here, so the phone uses those. `;
-  else note = '';
-  if (r.n < 4) note += 'One satellite short: every point on the orange line fits. Add a fourth to pin down where you are and the time.';
-  else if (!lab.noise && !lab.iono) note += 'With four or more satellites and no other errors, the answer is exact whatever the clock error. Try adding noise.';
-  else if (lab.iono && !lab.noise) note += 'The air delays low satellites more than high ones. The shared part goes into the clock; the rest mostly moves your height.';
-  else note += 'Random errors move the answer by roughly PDOP × the noise. Spread-out satellites (low PDOP) and more of them keep it small.';
-  document.getElementById('r-note').textContent = note;
+  if (r.n < 3) note = 'Too few satellites to say anything. Click the small grey satellites to add some.';
+  else if (r.n === 3) note = 'Three satellites, four unknowns (x, y, z and the clock): every point on the orange line fits. Click a grey satellite to add a fourth.';
+  else if (lab.noise > 0) note = `The answer moves by roughly PDOP × the random error. ${r.pdop > 4 ? 'Bunched satellites cross at shallow angles, so errors are magnified. Spread them out or add more.' : 'Add satellites, or spread them out, to shrink it.'}`;
+  else if (lab.iono > 0) note = 'The ionosphere delays low satellites more than high ones. The shared part goes into the clock; the rest moves you, mostly up or down.';
+  else note = 'Solved exactly, clock and all: with four or more satellites the clock error is just one more unknown.';
+  const text = lead + note;
+  const el = document.getElementById('r-note');
+  if (el.textContent !== text) el.textContent = text;
 }
