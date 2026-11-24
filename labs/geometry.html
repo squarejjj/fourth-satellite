@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Where the satellites are · The Fourth Satellite</title>
+<meta name="description" content="Drag satellites around the sky and watch 300 simulated GPS fixes spread out. Dilution of precision, and why height is tangled with the clock.">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../css/style.css">
+<script type="module" src="../js/pages/geometry.js"></script>
+</head>
+<body>
+<main>
+  <section class="hero wrap">
+    <div class="kicker">Lab 2 · Geometry</div>
+    <h1>Where the satellites are matters</h1>
+    <p class="lead">Every satellite’s measurement is a few metres out. How much that moves <i>you</i> depends on where the satellites sit in your sky. <b>Drag them around the sky plot</b> and watch 300 position fixes, each solved by the same receiver code, spread out or pull together.</p>
+  </section>
+
+  <section class="wrap">
+    <div class="bench">
+      <div class="panel-col">
+        <div class="card controls">
+          <div class="control">
+            <div class="label">Start from</div>
+            <div class="chips" id="presets">
+              <button class="btn sm" data-p="spread" type="button">Spread out</button>
+              <button class="btn sm" data-p="bunched" type="button">Bunched</button>
+              <button class="btn sm" data-p="high" type="button">All overhead</button>
+              <button class="btn sm" data-p="canyon" type="button">Street canyon</button>
+            </div>
+          </div>
+          <div class="control">
+            <div class="label">Satellites switched on <span class="val" id="count"></span></div>
+            <div class="chips" id="chips"></div>
+          </div>
+          <div class="control">
+            <label for="sigma">Error in each measurement <span class="val" id="sigma-val">5 m</span></label>
+            <input type="range" id="sigma" min="1" max="10" step="0.5" value="5">
+            <div class="sub">Each satellite’s distance is off by a random amount of about this size (1σ).</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="clock-known"> I know the exact time (no clock unknown)</label>
+          <label class="switch"><input type="checkbox" id="galileo"> Satellites 5–8 are Galileo (their own clock)</label>
+          <label class="switch"><input type="checkbox" id="cloud" checked> Show 300 simulated fixes</label>
+        </div>
+        <div class="callout key">
+          <h4>Try this</h4>
+          <p class="small">Press <b>Bunched</b>: the cloud of fixes stretches into a long streak. Then switch on <b>I know the exact time</b> and watch the <i>height</i> spread shrink most of all.</p>
+        </div>
+      </div>
+      <div class="viz-col">
+        <div class="viz-pair" style="grid-template-columns: 1fr 1fr">
+          <div class="viz ar-1"><canvas id="sky" role="img" aria-label="Sky plot with draggable satellites"></canvas><div class="cap">Your sky · drag satellites</div></div>
+          <div class="viz ar-1"><canvas id="cloud-cv" role="img" aria-label="Scatter of simulated position fixes"></canvas><div class="cap">300 fixes around you</div></div>
+        </div>
+        <div class="stats four" id="stats">
+          <div class="stat"><div class="k">Horizontal DOP</div><div class="v" id="hdop">—</div><div class="d">error ÷ range error, sideways</div></div>
+          <div class="stat"><div class="k">Vertical DOP</div><div class="v" id="vdop">—</div><div class="d">error ÷ range error, up–down</div></div>
+          <div class="stat"><div class="k">Height and clock tangled</div><div class="v" id="corr">—</div><div class="d">correlation of their errors</div></div>
+          <div class="stat"><div class="k">Spread of the fixes (1σ)</div><div class="v sm" id="spread">—</div><div class="d" id="spread-d">east / north / up</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <div class="notice-grid">
+        <div class="callout"><h4>Spread beats bunched</h4><p class="small">Two satellites in the same part of the sky tell the receiver nearly the same thing. Spread out, each adds new information, and the circles cross at sharp angles.</p></div>
+        <div class="callout"><h4>Height is worst, because of the clock</h4><p class="small">Every satellite you can hear is above you. A slightly longer distance to all of them could mean you are lower, <i>or</i> that your clock is slow. The receiver can’t fully tell which, so height and clock errors grow together.</p></div>
+        <div class="callout"><h4>The formula agrees with the solver</h4><p class="small">The ellipse is drawn from a formula (DOP). The dots come from actually solving 300 noisy measurement sets. About 39% of dots fall inside the dashed ellipse and 95% inside the solid one.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap accordion">
+      <details><summary>How it works</summary><div>
+      <p>The receiver solves the linearised equations <code>y = G·x</code> (see the <a href="solvers.html">solver lab</a>). Each row of <code>G</code> is the direction to one satellite plus a 1 for the clock. If each measurement has independent error of size σ, the errors in east, north, up and clock have covariance σ²·Q, where</p>
+      <div class="formula">Q = (GᵀG)⁻¹            row of G = [ −cos(el)·sin(az), −cos(el)·cos(az), −sin(el), 1 ]
+HDOP = √(Q_ee + Q_nn)    VDOP = √Q_uu    PDOP = √(Q_ee + Q_nn + Q_uu)    TDOP = √Q_tt
+position error (1σ) ≈ DOP × range error</div>
+      <p>Q depends only on the directions to the satellites, so a receiver can compute it before it measures anything. The dashed ellipse is σ·√(eigenvalues of the east–north block of Q); the solid one is 2.45 times bigger, which holds 95% of points for a two-dimensional normal spread.</p>
+      <p>The column of ones is the clock. When every satellite is above you, the “up” column of G is always negative too, so it looks a lot like the clock column, and the solver struggles to separate them. Ticking <b>I know the exact time</b> deletes that column. Ticking <b>Galileo</b> adds a second clock column for satellites 5–8, so one more satellite is needed.</p>
+      </div></details>
+      <details><summary>What we simplified</summary><div><p class="small">The Earth is a sphere, the satellites are placed by direction on a 26,560 km sphere, and every measurement error is independent with the same size. Real errors are partly shared between satellites (the atmosphere) and partly not, and receivers weight satellites differently. The receiver is at 37.5°N 127°E (Seoul), as in our research notes.</p></div></details>
+      <details><summary>Sources</summary><div><ul class="sources">
+        <li>ESA Navipedia, “Positioning Error”: DOP definitions and the local east–north–up form of G.</li>
+        <li>Penn State GEOG 862, “Dilution of Precision”: position error ≈ DOP × UERE, rules of thumb for DOP values.</li>
+        <li>Periodica Polytechnica Civil Engineering, on misconceptions about DOP (why “vertical is always worse” needs the clock to explain it).</li>
+        <li>Our team’s own simulation (research notes, Section 3): height–clock correlation of about 0.91 for an all-above sky, and about 0 for satellites all round the sphere. Checked on the <a href="../tests.html">self-test page</a>.</li>
+      </ul></div></details>
+    </div>
+    <div class="wrap" id="labnav"></div>
+  </section>
+</main>
+</body>
+</html>

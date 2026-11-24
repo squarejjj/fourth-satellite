@@ -1,0 +1,11 @@
+{
+  "name": "fourth-satellite",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Why your phone needs a fourth satellite: a working GPS receiver in the browser.",
+  "type": "module",
+  "scripts": {
+    "test": "node tests/run.js"
+  },
+  "license": "MIT"
+}

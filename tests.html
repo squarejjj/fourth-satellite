@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Self-test · The Fourth Satellite</title>
+<meta name="description" content="Every calculation on the site checked in your browser against published values and the team's research numbers.">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<script type="module" src="js/pages/tests.js"></script>
+</head>
+<body>
+<main>
+  <section class="hero wrap">
+    <div class="kicker">Self-test</div>
+    <h1>Check our working</h1>
+    <p class="lead">These checks run the site’s own code, right now in your browser, and compare it with published values and the numbers in our research notes. The same list runs from the command line with <code>node tests/run.js</code>.</p>
+    <div style="display:flex;gap:12px;align-items:center;margin-top:16px;flex-wrap:wrap">
+      <button class="btn primary" type="button" id="rerun">Run the checks again</button>
+      <span class="badge" id="summary">Running…</span>
+    </div>
+  </section>
+  <section class="wrap" style="margin-top:18px">
+    <div id="results" class="card" style="overflow:hidden"></div>
+  </section>
+</main>
+</body>
+</html>

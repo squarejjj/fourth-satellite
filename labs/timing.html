@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timing a signal · The Fourth Satellite</title>
+<meta name="description" content="How a phone measures a GPS signal's travel time: slide a copy of the satellite's code until it lines up, even when the signal is weaker than the noise.">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../css/style.css">
+<script type="module" src="../js/pages/timing.js"></script>
+</head>
+<body>
+<main>
+  <section class="hero wrap">
+    <div class="kicker">Lab 1 · Timing</div>
+    <h1>How your phone times a signal</h1>
+    <p class="lead">Each satellite repeats its own pattern of 1,023 “chips” every millisecond. Your phone makes its own copy of the pattern and slides it in time until it lines up with what arrives. <b>How far it had to slide is the travel time.</b> The catch: by the time it reaches you, the signal is weaker than the background noise.</p>
+  </section>
+
+  <section class="wrap">
+    <div class="bench">
+      <div class="panel-col">
+        <div class="card controls">
+          <div class="control">
+            <label for="shift">Slide the phone’s copy <span class="val" id="shift-val"></span></label>
+            <input type="range" id="shift" min="0" max="1022.5" step="0.5" value="300">
+            <div class="sub">Find where the match score jumps. Or let the phone search every position:</div>
+            <button class="btn accent" type="button" id="search" style="margin-top:10px;width:100%">Search every position</button>
+          </div>
+          <div class="control">
+            <label for="snr">Signal strength compared with the noise <span class="val" id="snr-val"></span></label>
+            <input type="range" id="snr" min="-30" max="10" step="1" value="-20">
+            <div class="sub">A real GPS signal is about 20 dB (100 times) weaker than the noise around it.</div>
+          </div>
+          <div class="control">
+            <label for="ms">How long the phone listens <span class="val" id="ms-val"></span></label>
+            <input type="range" id="ms" min="1" max="20" step="1" value="4">
+            <div class="sub">Adding up several repeats of the code makes the true match stand out more.</div>
+          </div>
+          <div class="control">
+            <div class="label">Which satellite to look for</div>
+            <div class="seg" id="prn" role="group" aria-label="Satellite code">
+              <button type="button" data-prn="1" aria-pressed="true">PRN 1</button>
+              <button type="button" data-prn="7" aria-pressed="false">PRN 7</button>
+              <button type="button" data-prn="19" aria-pressed="false">PRN 19</button>
+            </div>
+            <div class="sub">All three satellites transmit at the same time on the same frequency, each with its own code.</div>
+          </div>
+          <details class="more">
+            <summary>More options</summary>
+            <div>
+              <label class="switch"><input type="checkbox" id="others" checked> Other satellites in the signal too</label>
+              <label class="switch"><input type="checkbox" id="hidden"> Show the hidden signal under the noise</label>
+              <button class="btn sm" type="button" id="reroll">New noise and new delays</button>
+            </div>
+          </details>
+        </div>
+      </div>
+      <div class="viz-col">
+        <div class="viz" style="aspect-ratio: 16 / 7"><canvas id="strip" role="img" aria-label="Received signal, the phone's copy, and where they agree"></canvas><div class="cap">The first 48 chips: what arrives, and the phone’s copy</div></div>
+        <div class="viz" style="aspect-ratio: 16 / 7"><canvas id="corr" role="img" aria-label="Match score at every position of the copy"></canvas><div class="cap">Match score at every position</div></div>
+        <div class="stats four">
+          <div class="stat" id="st-score"><div class="k">Match score here</div><div class="v">—</div><div class="d">1 = perfect match</div></div>
+          <div class="stat" id="st-peak"><div class="k">Best position found</div><div class="v sm">—</div><div class="d"></div></div>
+          <div class="stat" id="st-time"><div class="k">Travel time it gives</div><div class="v sm">—</div><div class="d"></div></div>
+          <div class="stat" id="st-lock"><div class="k">Can the phone trust it?</div><div class="v sm">—</div><div class="d"></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <div class="notice-grid">
+        <div class="callout"><h4>You can’t see the signal, but you can find it</h4><p class="small">At −20 dB the code is invisible in the top trace. But at the right position, 2,046 tiny agreements add up while the noise mostly cancels, so the peak stands out. Listening longer helps for the same reason.</p></div>
+        <div class="callout"><h4>One frequency, many satellites</h4><p class="small">Every GPS satellite transmits on the same frequency. Each one’s code is nearly unrelated to the others’, so the copy of PRN 7’s code picks out PRN 7 and ignores the rest. This sharing trick is called CDMA.</p></div>
+        <div class="callout"><h4>Jamming is just more noise</h4><p class="small">Drag the signal strength down to −30 dB with 1 ms of listening: the peak sinks into the noise and the phone can’t trust any position. With no measurement there is no fix: “no fresh position”.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap accordion">
+      <details><summary>How it works</summary><div>
+      <p>The satellite’s code is a fixed sequence of +1s and −1s (we generate the real GPS C/A codes, which our <a href="../tests.html">self-test</a> checks against the published first chips). The phone multiplies what it receives by its own copy, sample by sample, and adds up the results:</p>
+      <div class="formula">match(shift) = (1/N) · Σ received[i + shift] × copy[i]        N = 2,046 samples (2 per chip)
+1 chip = 1 / 1,023,000 s = 977.5 ns  →  293.05 m of travel at the speed of light</div>
+      <p>When the copy is lined up, every product is +1 (plus noise), so they add up to about 1. When it is not, the products are a jumble of +1 and −1 that cancel. The codes are designed so the off-peak values are only ever −65, −1 or +63 out of 1,023.</p>
+      <p>The code repeats every millisecond, which is 300 km of travel, so the match only gives the travel time <i>within</i> one millisecond. The phone gets the whole milliseconds from the timing of the data the satellite sends on top of the code (a new 6-second subframe starts at known times), and from a rough idea of where it is.</p>
+      <p>Each code repeat is a fresh chance for the noise to be different, while the signal is the same. Adding K repeats makes the peak K times taller but the noise only √K times bigger. That is how the phone digs out a signal that is weaker than the noise.</p>
+      </div></details>
+      <details><summary>What we simplified</summary><div><p class="small">We send the raw code with no carrier wave and no data bits, at exactly 2 samples per chip, and the satellites don’t move, so there is no Doppler shift to search for as well. A real receiver searches delay and frequency together, then keeps tracking the peak with an early–late loop (see <a href="city.html">Lab 5</a>).</p></div></details>
+      <details><summary>Sources</summary><div><ul class="sources">
+        <li>IS-GPS-200, section 3.3.2.3 and Table 3-Ia: the C/A code generator (G1 and G2 shift registers, the tap pairs per PRN, and the first 10 chips in octal).</li>
+        <li>ESA Navipedia, “Correlators” and “GNSS Basic Observables”: matching a received code with a local copy to get the pseudorange.</li>
+        <li>Team research notes (Calvin’s Q&amp;A): resolving the 1 ms repeat from the navigation message timing; CDMA and spread spectrum.</li>
+      </ul></div></details>
+    </div>
+    <div class="wrap" id="labnav"></div>
+  </section>
+</main>
+</body>
+</html>

@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Fourth Satellite · why your phone needs one more satellite than you’d think</title>
+<meta name="description" content="A working GPS receiver in your browser. Your phone needs a fourth satellite because it doesn’t know what time it is: move the satellites, break the clock, and watch it solve for both.">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+<script type="module" src="js/pages/home.js"></script>
+</head>
+<body>
+<main>
+  <section class="hero wrap">
+    <div class="kicker">GPS, taken apart</div>
+    <h1>Your phone needs a fourth satellite because it doesn’t know what time it is.</h1>
+    <p class="lead">GPS satellites don’t tell your phone where it is. They tell it the <b>time</b>, and the phone’s own clock isn’t good enough to use it. <b>Follow the four steps below</b> (about two minutes) to see how it gets round that.</p>
+  </section>
+
+  <section class="wrap" id="bench" aria-label="The clock puzzle">
+    <div class="bench">
+      <div class="panel-col">
+        <div class="card steps" id="steps" aria-live="polite"></div>
+        <div class="card controls" id="controls">
+          <div class="control" id="ctl-clock">
+            <label for="clock">Your phone’s clock error <span class="val" id="clock-val">0.00 ms</span></label>
+            <input type="range" id="clock" min="-1" max="1" step="0.01" value="0" aria-describedby="clock-sub">
+            <div class="sub" id="clock-sub">0 ms: the phone’s clock agrees with the satellites.</div>
+          </div>
+          <div class="control" id="ctl-sats">
+            <div class="label">Satellites switched on</div>
+            <div class="chips" id="chips"></div>
+          </div>
+          <div class="control" id="ctl-mode">
+            <div class="label">What the phone does</div>
+            <div class="seg" role="group" aria-label="Receiver method">
+              <button type="button" data-mode="trust" aria-pressed="true">Trust its own clock</button>
+              <button type="button" data-mode="solve" aria-pressed="false">Solve for the time too</button>
+            </div>
+          </div>
+          <details class="more">
+            <summary>More options</summary>
+            <div>
+              <label class="switch"><input type="checkbox" id="show-curve" checked> Show every place that fits (with 2 satellites)</label>
+              <label class="switch"><input type="checkbox" id="show-raw" checked> Show the uncorrected circles (dashed)</label>
+              <button class="btn sm" type="button" id="reset">Start again</button>
+            </div>
+          </details>
+        </div>
+      </div>
+      <div class="viz-col">
+        <div class="viz-pair">
+          <div class="viz dark" id="space-box">
+            <canvas id="space" role="img" aria-label="Space view: a slice through the Earth with the satellites and the circles of distance around them"></canvas>
+            <div class="cap">Space view · to scale</div>
+            <div class="hint" id="space-hint">Drag a satellite or your phone</div>
+          </div>
+          <div class="viz ar-1">
+            <canvas id="close" role="img" aria-label="Close-up around your phone showing where the circles cross"></canvas>
+            <div class="cap">Close-up around you</div>
+            <div class="corner">
+              <button class="icon-btn" type="button" id="zoom-out" aria-label="Zoom out">−</button>
+              <button class="icon-btn" type="button" id="zoom-in" aria-label="Zoom in">+</button>
+            </div>
+          </div>
+        </div>
+        <div class="stats" id="stats">
+          <div class="stat" id="st-err"><div class="k">Where the phone thinks you are</div><div class="v">—</div><div class="d"></div></div>
+          <div class="stat" id="st-clock"><div class="k">The phone’s clock</div><div class="v sm">—</div><div class="d"></div></div>
+          <div class="stat" id="st-count"><div class="k">Unknowns vs. satellites heard</div><div class="v sm">—</div><div class="d"></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="measurements">
+    <div class="wrap">
+      <div class="grid-2">
+        <div>
+          <h3>What the phone measured</h3>
+          <p class="muted small">One row per satellite. The phone only ever sees the first columns; the shaded ones come from the simulator, which knows the truth.</p>
+          <div class="table-wrap"><table class="data" id="mtable"></table></div>
+          <p class="small muted" id="mtable-note" style="margin-top:8px"></p>
+        </div>
+        <div>
+          <h3>Position error as the clock error changes</h3>
+          <p class="muted small">Worked out now for the satellites you have on: the receiver is run 81 times, once for each clock error along the bottom.</p>
+          <div class="viz ar-43" style="aspect-ratio: 16 / 10"><canvas id="sweep" role="img" aria-label="Chart of position error against clock error"></canvas></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="three-d">
+    <div class="wrap">
+      <div class="kicker">Now in three dimensions</div>
+      <h2>Why the real world needs four</h2>
+      <p class="lead">In space, each distance puts you on a <b>sphere</b> around a satellite. With a wrong clock, three spheres leave a whole <b style="color:var(--accent-ink)">curve</b> of places that fit. The fourth sphere crosses that curve at one point: you.</p>
+      <div class="bench">
+        <div class="panel-col">
+          <div class="card controls">
+            <div class="control">
+              <div class="label">Satellites the phone uses</div>
+              <div class="seg" id="g-n" role="group" aria-label="Number of satellites">
+                <button type="button" data-n="3" aria-pressed="false">3</button>
+                <button type="button" data-n="4" aria-pressed="true">4</button>
+                <button type="button" data-n="5" aria-pressed="false">5</button>
+              </div>
+            </div>
+            <div class="control">
+              <label for="g-clock">Phone’s clock error <span class="val" id="g-clock-val">+0.30 ms</span></label>
+              <input type="range" id="g-clock" min="-1" max="1" step="0.01" value="0.3">
+            </div>
+            <label class="switch"><input type="checkbox" id="g-spheres" checked> Show the distance spheres</label>
+            <label class="switch"><input type="checkbox" id="g-move" checked> Satellites move</label>
+            <div class="chips"><button class="btn sm" type="button" id="g-far">View from space</button><button class="btn sm" type="button" id="g-near">Zoom in on you</button></div>
+          </div>
+          <div class="live" id="g-note">Loading the 3-D model…</div>
+          <div class="unknowns" role="table" aria-label="Unknowns and satellites needed">
+            <div class="h" role="columnheader">Where</div><div class="h" role="columnheader">Unknowns</div><div class="h" role="columnheader">Needs</div>
+            <div role="cell">Flat slice</div><div role="cell"><span class="pill">x</span><span class="pill">y</span><span class="pill t">time</span></div><div role="cell"><span class="big">3</span></div>
+            <div role="cell"><b>Real world</b></div><div role="cell"><span class="pill">x</span><span class="pill">y</span><span class="pill">z</span><span class="pill t">time</span></div><div role="cell"><span class="big" style="color:var(--accent-ink)">4</span></div>
+          </div>
+        </div>
+        <div class="viz-col">
+          <div class="viz dark" style="aspect-ratio: 16 / 11"><canvas id="globe" role="img" aria-label="3-D model of the Earth, the GPS satellites and the distance spheres"></canvas><div class="cap">3-D model · drag to turn, scroll or pinch to zoom</div></div>
+          <div class="stats">
+            <div class="stat" id="g-count"><div class="k">Unknowns vs. satellites</div><div class="v sm">—</div><div class="d"></div></div>
+            <div class="stat" id="g-err"><div class="k">Where the phone thinks you are</div><div class="v sm">—</div><div class="d"></div></div>
+            <div class="stat" id="g-time"><div class="k">The clock error it finds</div><div class="v sm">—</div><div class="d"></div></div>
+          </div>
+        </div>
+      </div>
+      <p class="small muted" style="margin-top:12px">24 satellites in 6 orbits tilted 55°, as in GPS, sped up so one orbit takes 90 seconds instead of 12 hours; the Earth’s spin isn’t shown. The phone picks the visible satellites (above 10°) with the best geometry. Three.js draws the picture; the satellite positions, the measurements and the solving are our own code, the same as on the slice above.</p>
+    </div>
+  </section>
+
+  <section class="section" id="labs">
+    <div class="wrap">
+      <h2>Go deeper: nine labs</h2>
+      <p class="lead">Each lab takes one part of the same machine and lets you break it. They all come back to the same idea: GPS is a timing problem.</p>
+      <div class="hub" id="hub"></div>
+    </div>
+  </section>
+
+  <section class="section" id="how">
+    <div class="wrap">
+      <div class="grid-2">
+        <div class="callout key">
+          <h4>What is real on this page</h4>
+          <p>The space view is a flat slice through the Earth and the GPS orbits, drawn to scale: Earth’s radius is 6,371 km and the orbits are 26,560 km from its centre. Satellites below your horizon can’t be heard, just as in reality. The circles, the crossing points, the curve of possible places and the chart are all computed as you move things.</p>
+          <p>“Solve” runs the same method real receivers use (Gauss–Newton least squares). It starts at the centre of the Earth with no idea where you are, and it is given only the satellites’ positions and the measured travel times, never where you really are.</p>
+        </div>
+        <div class="callout honest">
+          <h4>What is simplified</h4>
+          <p>A flat slice has one fewer dimension, so here it takes 3 satellites instead of 4. The Earth is a perfect sphere, the satellites hold still while you look, and their clocks are perfect. Real signals are also delayed by the air and bounce off buildings. The labs add those back in one at a time.</p>
+          <p><a href="tests.html">Run the self-test</a> to check our maths against published numbers, or <a href="https://github.com/squarejjj/fourth-satellite">read the code</a>.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+</body>
+</html>

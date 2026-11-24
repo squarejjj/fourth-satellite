@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smoothing the jumps · The Fourth Satellite</title>
+<meta name="description" content="A Kalman filter on a walk: predict where you should be, then correct by an amount set by how much you trust the GPS fix.">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../css/style.css">
+<script type="module" src="../js/pages/smoothing.js"></script>
+</head>
+<body>
+<main>
+  <section class="hero wrap">
+    <div class="kicker">Lab 6 · Smoothing</div>
+    <h1>Your phone doesn’t believe every fix</h1>
+    <p class="lead">Each GPS fix jumps around by a few metres. But you didn’t teleport, so where you were a second ago, and how fast you were going, say roughly where you must be now. A <b>Kalman filter</b> keeps both opinions and blends them. <b>Press Predict and Correct</b> to step through a walk, or press Play.</p>
+  </section>
+
+  <section class="wrap">
+    <div class="bench">
+      <div class="panel-col">
+        <div class="card controls">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <button class="btn" type="button" id="predict">1. Predict</button>
+            <button class="btn" type="button" id="correct">2. Correct</button>
+            <button class="btn accent" type="button" id="play">Play</button>
+            <button class="btn ghost" type="button" id="restart">Restart</button>
+          </div>
+          <div class="live" id="phase-note" style="margin-top:0"></div>
+          <div class="control">
+            <label for="q">Trust in the motion model <span class="val" id="q-val"></span></label>
+            <input type="range" id="q" min="-2" max="1" step="0.05" value="-0.3">
+            <div class="sub">Left: “I walk smoothly” (smooth but slow to notice turns). Right: “I could do anything” (follows every jump).</div>
+          </div>
+          <div class="control">
+            <label for="r">How jumpy each fix is <span class="val" id="r-val"></span></label>
+            <input type="range" id="r" min="1" max="15" step="0.5" value="5">
+          </div>
+          <label class="switch"><input type="checkbox" id="tunnel"> Walk through a tunnel (no fixes from 70 to 90 s)</label>
+        </div>
+        <div class="callout key"><h4>Try this</h4><p class="small">Slide <b>trust in the motion model</b> all the way left and play: the blue track is smooth but swings wide at the corner. All the way right: it copies every jump. The best setting is in between. Then try the tunnel.</p></div>
+      </div>
+      <div class="viz-col">
+        <div class="viz" style="aspect-ratio: 16 / 9"><canvas id="walk" role="img" aria-label="A walk with noisy GPS fixes and the filtered track"></canvas><div class="cap">The walk, seen from above</div></div>
+        <div class="viz" style="aspect-ratio: 16 / 5"><canvas id="err" role="img" aria-label="Error over time"></canvas><div class="cap">How far off, second by second</div></div>
+        <div class="stats four">
+          <div class="stat" id="st-raw"><div class="k">Raw fixes (rms)</div><div class="v">—</div><div class="d">after the first 10 s</div></div>
+          <div class="stat" id="st-kf"><div class="k">Filtered (rms)</div><div class="v">—</div><div class="d">same seconds</div></div>
+          <div class="stat" id="st-turn"><div class="k">Just after the turn</div><div class="v">—</div><div class="d">mean error, 60–75 s</div></div>
+          <div class="stat" id="st-gain"><div class="k">Share of each jump believed</div><div class="v">—</div><div class="d">the Kalman gain, settled</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap accordion">
+      <details><summary>How it works</summary><div>
+      <p>The filter tracks four numbers, east and north position and velocity, plus how unsure it is of them (the ellipse). Every second it does two things:</p>
+      <div class="formula">predict:  position += velocity × 1 s        uncertainty grows (by Q, set by “trust in the motion model”)
+correct:  estimate += K × (fix − predicted position)        uncertainty shrinks
+          K = P / (P + R): its own uncertainty compared with the fix’s (R = jumpiness²)</div>
+      <p>If the fixes are very jumpy, K is small and the filter leans on its prediction. If you keep surprising it, Q is big, K grows and it leans on the fixes. With no fix (the tunnel) it can only predict, and the ellipse keeps growing until fixes return. The velocity is never measured directly; the filter learns it because position and velocity uncertainties are linked.</p>
+      </div></details>
+      <details><summary>What we simplified</summary><div><p class="small">This is the generic textbook constant-velocity filter fed with finished fixes (“loosely coupled”), with independent 2-D noise on each fix. We found no source saying which filter any particular phone runs; real phones also mix in motion sensors and feed raw measurements into the filter. The walk and the noise are generated from a fixed seed.</p></div></details>
+      <details><summary>Sources</summary><div><ul class="sources">
+        <li>ESA Navipedia, “Kalman Filter”: predict/correct, and Q and R as trust settings.</li>
+        <li>Larry Levy (1997), “The Kalman Filter: Navigation’s Integration Workhorse”.</li>
+        <li>Team research notes, Section 4: the walk (1.4 m/s east for 60 s, then north), 5 m fixes, and the settled gains 0.132 / 0.360 / 0.661 for q = 0.05 / 0.5 / 3 m/s², checked on the <a href="../tests.html">self-test page</a>.</li>
+      </ul></div></details>
+    </div>
+    <div class="wrap" id="labnav"></div>
+  </section>
+</main>
+</body>
+</html>

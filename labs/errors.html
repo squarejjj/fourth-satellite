@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The error budget · The Fourth Satellite</title>
+<meta name="description" content="Switch GPS error sources on and off and see how they combine. The biggest error of all is the receiver's clock, and the fourth satellite removes it.">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../css/style.css">
+<script type="module" src="../js/pages/errors.js"></script>
+</head>
+<body>
+<main>
+  <section class="hero wrap">
+    <div class="kicker">Lab 3 · The error budget</div>
+    <h1>The biggest error is the one the fourth satellite removes</h1>
+    <p class="lead">Every measured distance carries several separate errors. Switch them on and off and see how they add up. Start with the <b>fourth satellite switched off</b>: the phone’s own clock swamps everything else.</p>
+  </section>
+
+  <section class="wrap">
+    <div class="bench wide-left">
+      <div class="panel-col">
+        <div class="card controls">
+          <label class="switch" style="font-weight:600"><input type="checkbox" id="fourth"> Use a fourth satellite to solve for the clock</label>
+          <div class="control">
+            <label for="clk">Phone’s clock error (if not solved) <span class="val" id="clk-val"></span></label>
+            <input type="range" id="clk" min="0.01" max="1" step="0.01" value="0.5">
+          </div>
+          <div class="control">
+            <div class="label">Typical values from</div>
+            <div class="chips" id="presets">
+              <button class="btn sm" type="button" data-p="sa">1995, SA on</button>
+              <button class="btn sm" type="button" data-p="off">1995, SA off</button>
+              <button class="btn sm" type="button" data-p="klob">+ ionosphere model</button>
+              <button class="btn sm" type="button" data-p="dual">Two frequencies</button>
+              <button class="btn sm" type="button" data-p="city">City street</button>
+            </div>
+            <div class="sub" id="preset-note"></div>
+          </div>
+          <div id="sources-ctl" style="display:grid;gap:12px"></div>
+          <div class="control">
+            <label for="hdop">Satellite geometry (HDOP) <span class="val" id="hdop-val"></span></label>
+            <input type="range" id="hdop" min="0.8" max="6" step="0.1" value="2">
+            <div class="sub">How much the geometry multiplies range errors sideways (see <a href="geometry.html">Lab 2</a>).</div>
+          </div>
+        </div>
+      </div>
+      <div class="viz-col">
+        <div class="viz" style="aspect-ratio: 16 / 9.5"><canvas id="bars" role="img" aria-label="Bar chart of each error source"></canvas><div class="cap">Error in each measured distance (1σ)</div></div>
+        <div class="stats four">
+          <div class="stat" id="st-uere"><div class="k">Total range error (UERE)</div><div class="v">—</div><div class="d">square root of the sum of squares</div></div>
+          <div class="stat" id="st-sum"><div class="k">If errors simply added</div><div class="v sm">—</div><div class="d">they don’t: they point different ways</div></div>
+          <div class="stat" id="st-horiz"><div class="k">Sideways position error</div><div class="v sm">—</div><div class="d">95% of fixes within (2 drms)</div></div>
+          <div class="stat" id="st-top"><div class="k">Biggest contributor</div><div class="v sm">—</div><div class="d"></div></div>
+        </div>
+        <div class="card pad">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+            <div><b>Check the rule against the real solver</b><div class="small muted">500 simulated fixes on an 8-satellite sky, each with these errors drawn at random per satellite.</div></div>
+            <button class="btn" type="button" id="check">Run 500 fixes</button>
+          </div>
+          <div id="check-out" class="small" style="margin-top:10px"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap accordion">
+      <details><summary>How it works</summary><div>
+      <p>The errors are independent: the ionosphere doesn’t know what the satellite clock is doing. Independent errors combine like steps in random directions, as the square root of the sum of their squares, so <b>the biggest one dominates</b>. A 7 m error and a 3.6 m error make 7.9 m, not 10.6 m. Removing the troposphere entirely (0.7 m) changes the 1995 total from 8.13 m to 8.10 m; removing the ionosphere brings it to 4.1 m.</p>
+      <div class="formula">UERE = √( σ_iono² + σ_tropo² + σ_clock+orbit² + σ_noise² + σ_multipath² )
+sideways error (1σ) ≈ HDOP × UERE        2 drms ≈ 2 × HDOP × UERE  (about 95%)</div>
+      <p>The receiver’s own clock isn’t in that list, because the solver removes it as the fourth unknown. Without that, a clock just 1 ms out puts about 300 km on every distance. It is by far the biggest error in GPS.</p>
+      </div></details>
+      <details><summary>What we simplified</summary><div><p class="small">These are textbook typical values from a 1995 report, when the US still degraded civilian GPS on purpose (“selective availability”, switched off in May 2000). The 1995 budget predicts about 32 m sideways with SA off, yet GPS.gov says phones are typically within about 4.9 m in open sky. Satellites, clocks and orbits have improved a lot since, phones see more satellites, and they smooth their fixes; we could not reconcile the two from our sources, so treat these as textbook numbers, not what your phone gets. The “city street” value uses the ~20 m one-sigma L1 errors measured on a phone in Hong Kong street canyons, where echoes break the “independent, zero-average” assumption anyway (see <a href="city.html">Lab 5</a>).</p></div></details>
+      <details><summary>Sources</summary><div><ul class="sources">
+        <li>National Research Council (1995), <i>The Global Positioning System: A Shared National Asset</i>, Tables 3-1 and 3-3: the error values and the 2 drms = 2 × UERE × HDOP rule.</li>
+        <li>GPS.gov, “GPS Accuracy”: user range error commitment and the typical smartphone accuracy.</li>
+        <li>Ng, Zhang, Luo and Hsu (2021), <i>NAVIGATION</i> 68(4): smartphone pseudorange errors in Hong Kong urban canyons.</li>
+        <li>Team research notes, Section 5: the root-sum-square totals (25.34 m, 8.13 m) and the 74% ionosphere share, checked on the <a href="../tests.html">self-test page</a>.</li>
+      </ul></div></details>
+    </div>
+    <div class="wrap" id="labnav"></div>
+  </section>
+</main>
+</body>
+</html>

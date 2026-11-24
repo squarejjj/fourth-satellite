@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Under the hood · The Fourth Satellite</title>
+<meta name="description" content="How the receiver solves its equations: guess, check and correct from the centre of the Earth, and a closed-form shortcut with a ghost answer.">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../css/style.css">
+<script type="module" src="../js/pages/solvers.js"></script>
+</head>
+<body>
+<main>
+  <section class="hero wrap">
+    <div class="kicker">Lab 9 · Under the hood</div>
+    <h1>Guess, check, correct</h1>
+    <p class="lead">The receiver can’t solve its four equations directly: each contains a square root. So it guesses (the centre of the Earth will do), straightens each equation out at the guess, solves those easy straight-line equations, and repeats. <b>Watch how fast the error collapses</b>, and what happens with satellites much closer to the Earth.</p>
+  </section>
+
+  <section class="wrap">
+    <div class="bench">
+      <div class="panel-col">
+        <div class="card controls">
+          <div class="control">
+            <label for="alt">Satellite height <span class="val" id="alt-val"></span></label>
+            <input type="range" id="alt" min="550" max="20200" step="50" value="20200">
+            <div class="sub">GPS orbits at 20,200 km. Low-orbit satellites (like Starlink) sit at about 550 km.</div>
+          </div>
+          <div class="control">
+            <div class="label">First guess</div>
+            <div class="seg" id="start" role="group"><button type="button" data-s="centre" aria-pressed="true">Earth’s centre</button><button type="button" data-s="away" aria-pressed="false">Other side of the Earth</button></div>
+          </div>
+          <label class="switch"><input type="checkbox" id="damp" checked> Safety net: halve a step that makes the fit worse</label>
+        </div>
+        <div class="callout key"><h4>Try this</h4><p class="small">At GPS height the error falls roughly like 1,000 km → 40 km → 40 m → 0.04 mm: each step <i>squares</i> the remaining error. Now drag the satellites down to 550 km and switch off the safety net.</p></div>
+      </div>
+      <div class="viz-col">
+        <div class="viz" style="aspect-ratio: 16 / 7.5"><canvas id="conv" role="img" aria-label="Error after each guess"></canvas><div class="cap">Distance from the truth after each guess</div></div>
+        <div class="table-wrap"><table class="data" id="iters"></table></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <h2>A shortcut with a ghost</h2>
+      <p class="lead">Bancroft’s method (1985) skips the guessing: squaring the equations turns everything into one quadratic. A quadratic has <b>two</b> answers. Usually one fails the original equations. <b>Drag the three beacons into a straight line</b> and both answers fit perfectly: the receiver can’t tell you from your mirror image.</p>
+      <div class="bench">
+        <div class="panel-col">
+          <div class="card controls">
+            <div class="control">
+              <label for="bclk">Clock error <span class="val" id="bclk-val"></span></label>
+              <input type="range" id="bclk" min="-20" max="20" step="0.5" value="6">
+            </div>
+            <div class="chips"><button class="btn sm" type="button" id="line">Put the beacons in a line</button><button class="btn sm" type="button" id="spread">Spread them out</button></div>
+            <div class="sub">A flat world: 3 beacons for x, y and the clock. Drag the beacons (circles) or yourself.</div>
+          </div>
+          <div class="table-wrap"><table class="data" id="roots"></table></div>
+        </div>
+        <div class="viz-col">
+          <div class="viz" style="aspect-ratio: 16 / 10"><canvas id="plane" role="img" aria-label="Flat world with three beacons and the two answers"></canvas><div class="cap">Flat world, seen from above</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap accordion">
+      <details><summary>How it works</summary><div>
+        <p>For a guess (x, y, z, b), each satellite’s predicted pseudorange is |satellite − guess| + b. The receiver replaces that curved function by its tangent at the guess. Row i of the matrix G is the unit vector from satellite i to the guess, then a 1 for the clock, and it solves</p>
+        <div class="formula">G · Δ = measured − predicted          Δ = (GᵀG)⁻¹ Gᵀ (measured − predicted)          guess ← guess + Δ</div>
+        <p>If the guess is wrong by e, the tangent is wrong by only about e² ÷ (2 × distance to the satellite). With satellites 20,000 km away that factor is tiny, so each step squares the error and divides it by about 40,000 km. At 550 km the factor is about 30 times bigger, so a guess from the centre of the Earth is far less reliable: the NAVIGATION paper in our research found plain Gauss–Newton struggles there and adds a step-size factor below 1, as our safety net does.</p>
+        <p>Bancroft writes each equation with a “Lorentz” dot product ⟨a, b⟩ = a₁b₁ + a₂b₂ + a₃b₃ − a₄b₄ that subtracts the clock term, which turns the problem into <code>⟨u,u⟩Λ² + 2(⟨u,v⟩ − 1)Λ + ⟨v,v⟩ = 0</code>. Each root gives a candidate position and clock; the receiver keeps the one that satisfies the original, unsquared equations. Our <a href="../tests.html">self-test</a> checks that this agrees with Gauss–Newton.</p>
+      </div></details>
+      <details><summary>What we simplified</summary><div><p class="small">Noise-free measurements, a spherical Earth, satellites placed by direction. For low orbits we keep the same sky directions and only change the height, which is not how a real low-orbit constellation looks.</p></div></details>
+      <details><summary>Sources</summary><div><ul class="sources">
+        <li>ESA Navipedia, “Code Based Positioning (SPS)” and “Bancroft Method”.</li>
+        <li>S. Bancroft (1985), “An Algebraic Solution of the GPS Equations”, IEEE Trans. Aerospace and Electronic Systems AES-21(1).</li>
+        <li>Abel and Chaffee (1991) and Fang (1992), IEEE Trans. AES: when the second solution is real (e.g. satellites in one plane).</li>
+        <li><i>NAVIGATION</i> 73(1): damped Gauss–Newton for low-orbit positioning. Team research notes, Sections 1–2.</li>
+      </ul></div></details>
+    </div>
+    <div class="wrap" id="labnav"></div>
+  </section>
+</main>
+</body>
+</html>
