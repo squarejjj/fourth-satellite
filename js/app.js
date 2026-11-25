@@ -43,8 +43,7 @@ try {
 }
 
 // ── Home → story ──
-document.getElementById('generate').addEventListener('click', async () => {
-  try { await document.fonts.load('600 18px "Inter"'); } catch { /* the system font will do */ }
+document.getElementById('generate').addEventListener('click', () => {
   body.classList.replace('mode-intro', 'mode-story');
   window.scrollTo(0, 0);
   gShown = gFromScroll();

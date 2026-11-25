@@ -69,7 +69,7 @@ There is no build step and nothing to install. From the top of the repository:
 python3 -m http.server 8000
 ```
 
-Then open <http://localhost:8000/>. Browsers won't load JavaScript modules from a file opened directly, which is why it needs a server. The page needs an internet connection to fetch Three.js, the Earth imagery and the font. Add `?still` to the address to make camera moves instant (handy for screenshots or slow devices).
+Then open <http://localhost:8000/>. Browsers won't load JavaScript modules from a file opened directly, which is why it needs a server. The page needs an internet connection to fetch Three.js and the Earth imagery. Text uses your device's own sans-serif font (San Francisco on Apple devices, Segoe UI on Windows, Roboto on Android), so there is no font to download. Add `?still` to the address to make camera moves instant (handy for screenshots or slow devices).
 
 ## The code
 
@@ -93,7 +93,6 @@ Then open <http://localhost:8000/>. Browsers won't load JavaScript modules from 
 |---|---|---|
 | [Three.js](https://threejs.org) r160, loaded from the jsDelivr CDN | Drawing the 3-D model | WebGL by hand would be thousands of lines that teach nothing about GPS. Three.js only draws; positions and solutions come from our code. MIT licence. |
 | Earth imagery (colour, normal and cloud maps) from the three.js examples, loaded from jsDelivr | The Earth's surface | Real imagery reads instantly as "Earth"; we did not want to ship our own copy. |
-| Inter, from Google Fonts | All text | A typeface drawn for screens: clear at small sizes, with even-width digits so changing numbers don't jiggle (SIL Open Font License). |
 
 Parts of the code and text were drafted with an AI coding assistant (Claude, by Anthropic), working from the team's research notes.
 
