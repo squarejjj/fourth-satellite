@@ -84,6 +84,7 @@ Then open <http://localhost:8000/>. Browsers won't load JavaScript modules from 
 | `js/core/geo.js`, `linalg.js`, `rng.js`, `constants.js` | Coordinates, small matrices, seeded random numbers, constants |
 | `js/scene.js` | The Earth, satellites, spheres and lab (drawing and interaction) |
 | `js/city.js` | The opening city scene (scenery only) |
+| `js/veil.js` | The sky-coloured haze the street fades into and the Earth comes out of |
 | `js/app.js` | The page: home, scroll steps, lab controls |
 | `tests/` | The checks and the command-line runner |
 
