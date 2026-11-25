@@ -30,7 +30,7 @@ The code is split the way a real receiver is:
 - **`js/core/world.js` (the simulator)** knows the truth: where you are and how wrong your clock is. It turns that into the only thing a receiver gets: one pseudorange per satellite (distance + c × clock error + any extra delays).
 - **`js/core/receiver.js` (the receiver)** sees only satellite positions and pseudoranges, never the truth. It solves with Gauss–Newton least squares: guess (the centre of the Earth), predict each pseudorange, replace each curved equation by its tangent, solve the small linear system, repeat. The clock is a column of ones in the matrix. If a full step makes the fit worse, it takes half a step, which keeps it converging from the Earth's centre even with bunched satellites. With exactly three satellites it also computes the curve of every position that fits (three-sphere intersection for each clock guess). `receiver.js` does not import `world.js`; a test checks that.
 
-`js/scene.js` draws the Earth and the satellites with Three.js, and `js/city.js` draws the opening city scene (in metres, as its own scene, because a street and a planet are too different in size to share one). `js/app.js` runs the page: one animation loop turns the scroll position into a single smoothed number (how many steps you are through the story) and both scenes draw themselves from it, which is why the model glides instead of jumping.
+`js/scene.js` draws the Earth and the satellites with Three.js, and `js/city.js` draws the opening city scene (in metres, as its own scene, because a street and a planet are too different in size to share one). The two scenes hand over in a haze: both keep zooming out around your blue dot, the street fades into the sky's colour, the two canvases swap while the screen is all haze, and the Earth comes out of it (`js/veil.js`). `js/app.js` runs the page: one animation loop turns the scroll position into a single smoothed number (how many steps you are through the story) and both scenes draw themselves from it, which is why the model glides instead of jumping.
 
 ### What is computed and what is drawn by hand
 
@@ -93,7 +93,7 @@ Then open <http://localhost:8000/>. Browsers won't load JavaScript modules from 
 |---|---|---|
 | [Three.js](https://threejs.org) r160, loaded from the jsDelivr CDN | Drawing the 3-D model | WebGL by hand would be thousands of lines that teach nothing about GPS. Three.js only draws; positions and solutions come from our code. MIT licence. |
 | Earth imagery (colour, normal and cloud maps) from the three.js examples, loaded from jsDelivr | The Earth's surface | Real imagery reads instantly as "Earth"; we did not want to ship our own copy. |
-| Pixelify Sans, from Google Fonts | All text | A readable pixel font (SIL Open Font License). |
+| Inter, from Google Fonts | All text | A typeface drawn for screens: clear at small sizes, with even-width digits so changing numbers don't jiggle (SIL Open Font License). |
 
 Parts of the code and text were drafted with an AI coding assistant (Claude, by Anthropic), working from the team's research notes.
 

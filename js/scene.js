@@ -19,6 +19,7 @@ import { dopFromSky } from './core/dop.js';
 import { slantFactor } from './core/iono.js';
 import { sub, norm } from './core/linalg.js';
 import { gaussianSource } from './core/rng.js';
+import { makeVeil } from './veil.js';
 
 const U = 1e6;                                             // 1 scene unit = 1,000 km
 const R = 6.371;                                           // Earth's radius in scene units
@@ -161,6 +162,8 @@ export function createScene(canvas, { labelLayer, onReadout = () => {}, onPick =
   // ── You, the phone's answer, the signal ──
   const spriteOf = (color, size, order) => { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: dotTexture(color), depthTest: false, sizeAttenuation: false, transparent: true })); s.scale.set(size, size, 1); s.renderOrder = order; scene.add(s); return s; };
   const youDot = spriteOf('#0a84ff', 0.045, 8);
+  const veil = makeVeil(7.9);          // the haze the Earth comes out of (under the blue dot)
+  scene.add(veil.mesh);
   const ansDot = spriteOf(ORANGE, 0.04, 9);
   const pulse = spriteOf('#ffcc00', 0.03, 7);
 
@@ -247,16 +250,16 @@ export function createScene(canvas, { labelLayer, onReadout = () => {}, onPick =
     const wideT = you.clone().lerp(first3, 0.42);
     const wide = { target: wideT, pos: wideT.clone().add(perp.clone().add(up.clone().multiplyScalar(0.3)).normalize().multiplyScalar(56)), fit: true };
     return [
-      [1.4, above(1.6)],                                                                               // just above you as the city fades
-      [2.4, around(25, 0.9, 0.32, -0.28)],                                                             // the whole Earth, you near the middle
+      [1.4, { ...above(0.35), tspan: [1.95, 2.4] }],                                                   // just above you, out of the city's haze; stays on you until 1.95
+      [2.4, { ...around(25, 0.9, 0.32, -0.28), fit: true }],                                           // the whole Earth, you near the middle
       [3.4, around(80, 0.8, 0.45, -0.3)],                                                              // the constellation
       [4.4, { target: mid(0.5), pos: mid(0.5).add(perp.clone().multiplyScalar(40)).add(up.clone().multiplyScalar(12)) }],  // one satellite and you
       [5.4, { target: mid(0.3), pos: mid(0.3).add(perp.clone().multiplyScalar(70)).add(up.clone().multiplyScalar(18)) }], // its sphere
       [6.45, wide],                                                                                    // three spheres meet
       [7.4, nearYou(6.5)],                                                                             // a wrong clock
       [8.6, nearYou(6.5)],                                                                             // the fourth satellite
-      [9.45, around(54, 0.85, 0.4, -0.35)],                                                            // many satellites
-      [10.2, above(1.4)],                                                                              // back down to the car
+      [9.45, { ...around(54, 0.85, 0.4, -0.35), tspan: [9.45, 9.9] }],                                // many satellites; then centre on you
+      [10.3, above(0.35)],                                                                             // back down to the car, into the haze
     ];
   })();
   const offA = new THREE.Vector3(), offB = new THREE.Vector3();
@@ -267,7 +270,8 @@ export function createScene(canvas, { labelLayer, onReadout = () => {}, onPick =
     while (i < KEYS.length - 2 && g > KEYS[i + 1][0]) i++;
     const [ta, a] = KEYS[i], [tb, b] = KEYS[i + 1];
     const f = ramp(g, ta, tb);
-    outTarget.lerpVectors(a.target, b.target, f);
+    // the look-at point can move on its own timetable (tspan), e.g. stay on you while zooming out
+    outTarget.lerpVectors(a.target, b.target, a.tspan ? ramp(g, a.tspan[0], a.tspan[1]) : f);
     // glide: blend the viewing direction and the zoom (distance on a log scale)
     offA.subVectors(a.pos, a.target); offB.subVectors(b.pos, b.target);
     const da = offA.length() * fitK(a), db = offB.length() * fitK(b);
@@ -502,7 +506,7 @@ export function createScene(canvas, { labelLayer, onReadout = () => {}, onPick =
   resize();
 
   // ── One frame (called by the page's animation loop) ──
-  let g = 0, alpha = 0, last = performance.now(), fly = null, lastSeed = 0;
+  let g = 0, alpha = 0, veilA = 0, last = performance.now(), fly = null, lastSeed = 0;
   const goalPos = new THREE.Vector3(), goalTarget = new THREE.Vector3(), look = new THREE.Vector3();
   setCurve(story.curve, 'story');
   function tick(now) {
@@ -528,7 +532,8 @@ export function createScene(canvas, { labelLayer, onReadout = () => {}, onPick =
       controls.update();
     }
     sunLight.position.copy(camera.position).add(new THREE.Vector3(18, 26, 10));
-    placeTags(mode === 'story' ? clamp01((alpha - 0.5) * 2) : 1);
+    veil.set(mode === 'story' ? veilA : 0);
+    placeTags(mode === 'story' ? clamp01((alpha - 0.5) * 2) * (1 - veilA) : 1);
     renderer.render(scene, camera);
   }
   // Lab views: from space (you and every satellite you can hear), or close to you.
@@ -545,12 +550,12 @@ export function createScene(canvas, { labelLayer, onReadout = () => {}, onPick =
 
   return {
     tick,
-    setStory(gg, a) {
+    setStory(gg, a, v = 0) {
       if (mode !== 'story') {
         if (mode === 'lab') setCurve(story.curve, 'story');
         mode = 'story'; controls.enabled = false; applyOffset();
       }
-      g = gg; alpha = a;
+      g = gg; alpha = a; veilA = v;
     },
     setLab(params = {}) {
       if (mode !== 'lab') {

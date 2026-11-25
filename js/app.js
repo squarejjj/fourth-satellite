@@ -44,7 +44,7 @@ try {
 
 // ── Home → story ──
 document.getElementById('generate').addEventListener('click', async () => {
-  try { await document.fonts.load('600 18px "Pixelify Sans"'); } catch { /* the system font will do */ }
+  try { await document.fonts.load('600 18px "Inter"'); } catch { /* the system font will do */ }
   body.classList.replace('mode-intro', 'mode-story');
   window.scrollTo(0, 0);
   gShown = gFromScroll();
@@ -90,10 +90,15 @@ function loop(now) {
   if (body.classList.contains('mode-story')) {
     const gTarget = gFromScroll();
     gShown = STILL ? gTarget : gShown + (gTarget - gShown) * (1 - Math.exp(-dt * 6));
-    const cityA = clamp01(1 - ramp(gShown, 1.55, 2.05) + ramp(gShown, 9.75, 10.25));
+    // Street ⇄ planet. Both scenes keep zooming out around your blue dot; the street fades into a
+    // haze of sky colour, the canvases swap while the screen is all haze, and the Earth comes out
+    // of it. (And the same in reverse on the way back down.)
+    const cityA = clamp01(1 - ramp(gShown, 1.77, 1.81) + ramp(gShown, 10.07, 10.11));
+    const cityVeil = gShown < 6 ? ramp(gShown, 1.5, 1.78) : 1 - ramp(gShown, 10.1, 10.32);
+    const earthVeil = gShown < 6 ? 1 - ramp(gShown, 1.8, 2.12) : ramp(gShown, 9.88, 10.08);
     cityCanvas.style.opacity = cityA.toFixed(3);
-    city.set(gShown, cityA);
-    earth.setStory(gShown, 1 - cityA);
+    city.set(gShown, cityA, cityVeil);
+    earth.setStory(gShown, 1 - cityA, earthVeil);
     city.tick(now);
     earth.tick(now);
     fadeCopies();

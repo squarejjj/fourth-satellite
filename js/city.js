@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mulberry32 } from './core/rng.js';
+import { makeVeil } from './veil.js';
 
 const clamp01 = (x) => Math.min(1, Math.max(0, x));
 const smooth = (t) => t * t * (3 - 2 * t);
@@ -24,8 +25,10 @@ const KEYS = [
   { t: 0.0, off: [3.4, 2.9, 10.5], look: [0, 1.4, -14] },
   { t: 0.45, off: [3.4, 2.9, 10.5], look: [0, 1.4, -14] },
   { t: 1.35, off: [36, 96, 66], look: [0, 0, -8] },
-  { t: 2.1, off: [0, 4200, 1700], look: [0, 0, -300] },
-  { t: 9.6, off: [0, 4200, 1700], look: [0, 0, -300] },
+  // straight up over the car, seen from the south like the Earth scene's first view, so the two
+  // scenes line up when they swap (the car's blue dot stays where it is on screen)
+  { t: 2.1, off: [0, 2819, 1026], look: [0, 0, 0] },
+  { t: 9.6, off: [0, 2819, 1026], look: [0, 0, 0] },
   { t: 10.45, off: [-12.5, 5.5, -14.5], look: [0, 1.1, -1] },
 ];
 
@@ -175,10 +178,12 @@ export function createCity(canvas, { labelLayer } = {}) {
     c.fillStyle = '#0a84ff'; c.beginPath(); c.arc(64, 62, 22, 0, Math.PI * 2); c.fill();
     const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
   })();
-  const dot = new THREE.Sprite(new THREE.SpriteMaterial({ map: dotTex, depthTest: false, sizeAttenuation: false }));
+  const dot = new THREE.Sprite(new THREE.SpriteMaterial({ map: dotTex, depthTest: false, sizeAttenuation: false, fog: false }));
   dot.scale.set(0.055, 0.055, 1);
   dot.renderOrder = 10;
   scene.add(dot);
+  const veil = makeVeil(9);            // the haze the street fades into (under the dot)
+  scene.add(veil.mesh);
 
   // A label that follows the dot.
   const tag = document.createElement('div');
@@ -205,7 +210,7 @@ export function createCity(canvas, { labelLayer } = {}) {
   resize();
 
   // ── State and drawing ──
-  let born = null, g = 0, alpha = 1, t0 = performance.now();
+  let born = null, g = 0, alpha = 1, veilA = 0, t0 = performance.now();
   const carPos = new THREE.Vector3();
   const target = new THREE.Vector3(), rel = new THREE.Vector3(), relB = new THREE.Vector3(), tB = new THREE.Vector3();
   function cameraAt(gg, out, look) {
@@ -262,6 +267,7 @@ export function createCity(canvas, { labelLayer } = {}) {
     scene.fog.near = 180 + hgt * 0.9;
     scene.fog.far = 1300 + hgt * 3.4;
     placeSun(tmp.set(carPos.x, 60, carPos.z + (g < 5 ? -230 : 230)));   // ahead of the car, or behind it at the end
+    veil.set(veilA);
     renderer.render(scene, camera);
     // the label over the blue dot, only while the story talks about it
     const ta = smooth(clamp01((g - 0.55) / 0.3)) * (1 - smooth(clamp01((g - 1.45) / 0.25))) * alpha;
@@ -272,7 +278,7 @@ export function createCity(canvas, { labelLayer } = {}) {
 
   return {
     generate() { born = performance.now(); t0 = born; built = false; },
-    set(gg, a) { g = gg; alpha = a; },
+    set(gg, a, v = 0) { g = gg; alpha = a; veilA = v; },
     tick,
   };
 }
