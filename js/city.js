@@ -10,10 +10,12 @@ const clamp01 = (x) => Math.min(1, Math.max(0, x));
 const smooth = (t) => t * t * (3 - 2 * t);
 
 const BLOCK = 120, ROAD = 16;         // city blocks every 120 m, streets 16 m wide
-const XB = 5, ZB0 = -22, ZB1 = 7;     // blocks across, and along the car's street
+const XB = 5, ZB0 = -22, ZB1 = 9;     // blocks across, and along the car's street
 const LANE_X = 4;                     // the car drives north (−z) in the right-hand lane of the street at x = 0
 const SPEED = 8;                      // m/s
-const START_Z = 700, END_Z = -2300;
+// The city repeats every 6 blocks (720 m) along the street, so when the car has driven 3 repeats it
+// can jump back to the start without anything on screen changing.
+const REPEAT = 6 * BLOCK, START_Z = 700, LOOP = 3 * REPEAT;
 const SKY = '#eef2f7';
 
 // Where the camera is, relative to the car, along the story (g = how far you have scrolled, in steps).
@@ -43,18 +45,36 @@ export function createCity(canvas, { labelLayer } = {}) {
   scene.add(new THREE.HemisphereLight(0xffffff, 0xd3d7de, 1.1));
   const sun = new THREE.DirectionalLight(0xfff6ea, 2.3);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(window.innerWidth < 820 ? 1024 : 2048, window.innerWidth < 820 ? 1024 : 2048);
-  Object.assign(sun.shadow.camera, { left: -190, right: 190, top: 190, bottom: -190, near: 1, far: 700 });
+  // The shadow box covers about 540 m of street on the side the camera looks at, so its edge stays
+  // far off in the haze, and it moves in whole shadow-map texels so the shadows never shimmer.
+  const SHADOW = window.innerWidth < 820 ? 2048 : 3072, SPAN_R = 770, SPAN_U = 680;
+  sun.shadow.mapSize.set(SHADOW, SHADOW);
+  Object.assign(sun.shadow.camera, { left: -SPAN_R / 2, right: SPAN_R / 2, top: SPAN_U / 2, bottom: -SPAN_U / 2, near: 1, far: 1400 });
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.04;
   scene.add(sun, sun.target);
+  const SUN_DIR = new THREE.Vector3(90, 170, 70).normalize();
+  const SUN_RIGHT = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), SUN_DIR).normalize();
+  const SUN_UP = new THREE.Vector3().crossVectors(SUN_DIR, SUN_RIGHT).normalize();
+  const TEX_R = SPAN_R / SHADOW, TEX_U = SPAN_U / SHADOW;
+  const snapped = new THREE.Vector3();
+  function placeSun(c) {
+    const r = Math.round(c.dot(SUN_RIGHT) / TEX_R) * TEX_R, u = Math.round(c.dot(SUN_UP) / TEX_U) * TEX_U;
+    snapped.copy(SUN_RIGHT).multiplyScalar(r).addScaledVector(SUN_UP, u).addScaledVector(SUN_DIR, c.dot(SUN_DIR));
+    sun.target.position.copy(snapped);
+    sun.position.copy(snapped).addScaledVector(SUN_DIR, 700);
+  }
 
   // ── The ground and the streets ──
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(80000, 80000), new THREE.MeshStandardMaterial({ color: '#e6e8ec', roughness: 1 }));
+  // pushed back in depth, so roads and the feet of rising buildings always draw over it
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(80000, 80000), new THREE.MeshStandardMaterial({ color: '#e6e8ec', roughness: 1, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4 }));
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
   scene.add(ground);
-  const roadMat = new THREE.MeshStandardMaterial({ color: '#c9cdd4', roughness: 0.95 });
+  // Flat layers (ground < roads < markings < route < halo) sit a few cm apart; polygon offset
+  // keeps the depth test from flickering between them at a distance.
+  const layer = (mat, k) => Object.assign(mat, { polygonOffset: true, polygonOffsetFactor: -k, polygonOffsetUnits: -2 * k });
+  const roadMat = layer(new THREE.MeshStandardMaterial({ color: '#c9cdd4', roughness: 0.95 }), 1);
   const flat = (w, l, mat, x, z, y) => {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, l), mat);
     m.rotation.x = -Math.PI / 2;
@@ -64,24 +84,24 @@ export function createCity(canvas, { labelLayer } = {}) {
     return m;
   };
   const zMid = ((ZB0 + ZB1) / 2) * BLOCK, zLen = (ZB1 - ZB0 + 1) * BLOCK;
-  for (let i = -XB; i <= XB; i++) flat(ROAD, zLen, roadMat, i * BLOCK, zMid, 0.03);
-  for (let j = ZB0; j <= ZB1; j++) flat((2 * XB + 1) * BLOCK, ROAD, roadMat, 0, j * BLOCK, 0.031);
+  for (let i = -XB; i <= XB; i++) flat(ROAD, zLen, roadMat, i * BLOCK, zMid, 0.04);
+  for (let j = ZB0; j <= ZB1; j++) flat((2 * XB + 1) * BLOCK, ROAD, roadMat, 0, j * BLOCK, 0.04);
   // lane markings on the car's street
-  const paint = new THREE.MeshBasicMaterial({ color: '#ffffff' });
-  flat(0.18, zLen, paint, 0, zMid, 0.05);
+  const paint = layer(new THREE.MeshBasicMaterial({ color: '#ffffff' }), 2);
+  flat(0.18, zLen, paint, 0, zMid, 0.08);
   const dashes = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.16, 3), paint, Math.ceil(zLen / 9) * 2);
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0)), one = new THREE.Vector3(1, 1, 1);
   let d = 0;
   for (let z = ZB0 * BLOCK; z < (ZB1 + 1) * BLOCK && d < dashes.count - 1; z += 9) {
-    for (const x of [-LANE_X, LANE_X]) { m4.compose(new THREE.Vector3(x, 0.05, z), q, one); dashes.setMatrixAt(d++, m4); }
+    for (const x of [-LANE_X, LANE_X]) { m4.compose(new THREE.Vector3(x, 0.08, z), q, one); dashes.setMatrixAt(d++, m4); }
   }
   dashes.count = d;
   scene.add(dashes);
 
   // ── Buildings: plain white blocks, like an architect's model ──
-  const rand = mulberry32(31);
   const boxes = [];
   for (let i = -XB; i < XB; i++) for (let j = ZB0; j < ZB1; j++) {
+    const rand = mulberry32(31 + (i + XB) * 101 + (((j % 6) + 6) % 6) * 13);   // same buildings every 6 blocks
     const x0 = i * BLOCK + ROAD / 2 + 4, z0 = j * BLOCK + ROAD / 2 + 4, inner = BLOCK - ROAD - 8;
     const park = rand() < 0.08;
     if (park) continue;
@@ -101,19 +121,19 @@ export function createCity(canvas, { labelLayer } = {}) {
   const flatM = new THREE.Matrix4();
   boxes.forEach((b, k) => {
     col.setRGB(b.tint, b.tint, b.tint * 1.01); buildings.setColorAt(k, col);
-    flatM.compose(new THREE.Vector3(b.x, 0, b.z), new THREE.Quaternion(), new THREE.Vector3(b.w, 0.0001, b.d)); buildings.setMatrixAt(k, flatM);
+    flatM.compose(new THREE.Vector3(b.x, -2, b.z), new THREE.Quaternion(), new THREE.Vector3(b.w, 0.01, b.d)); buildings.setMatrixAt(k, flatM);   // hidden below the ground until it rises
   });
   scene.add(buildings);
 
   // ── Trees along the car's street ──
-  const crowns = new THREE.InstancedMesh(new THREE.SphereGeometry(2.3, 14, 10), new THREE.MeshStandardMaterial({ color: '#8fc48a', roughness: 0.9 }), 400);
-  const trunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.22, 0.28, 4, 8), new THREE.MeshStandardMaterial({ color: '#9c8a74', roughness: 1 }), 400);
+  const crowns = new THREE.InstancedMesh(new THREE.SphereGeometry(2.3, 14, 10), new THREE.MeshStandardMaterial({ color: '#8fc48a', roughness: 0.9 }), 500);
+  const trunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.22, 0.28, 4, 8), new THREE.MeshStandardMaterial({ color: '#9c8a74', roughness: 1 }), 500);
   crowns.castShadow = trunks.castShadow = true;
   let tcount = 0;
-  for (let z = ZB0 * BLOCK; z < (ZB1 + 1) * BLOCK && tcount < 400; z += 16) {
+  for (let z = ZB0 * BLOCK; z < (ZB1 + 1) * BLOCK && tcount < 500; z += 16) {
     if (Math.abs(((z % BLOCK) + BLOCK) % BLOCK) < ROAD) continue; // not in a crossing
     for (const x of [-(ROAD / 2 + 2.5), ROAD / 2 + 2.5]) {
-      const s = 0.85 + ((tcount * 7919) % 30) / 100;
+      const s = 0.85 + ((Math.round((((z % REPEAT) + REPEAT) % REPEAT) / 16) * 7919 + (x > 0 ? 17 : 0)) % 30) / 100;
       m4.compose(new THREE.Vector3(x, 2, z), new THREE.Quaternion(), new THREE.Vector3(1, 1, 1)); trunks.setMatrixAt(tcount, m4);
       m4.compose(new THREE.Vector3(x, 5.2 * s, z), new THREE.Quaternion(), new THREE.Vector3(s, s, s)); crowns.setMatrixAt(tcount, m4);
       tcount++;
@@ -138,11 +158,13 @@ export function createCity(canvas, { labelLayer } = {}) {
   scene.add(car);
 
   // ── The navigation route and the blue dot ──
-  const route = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 1), new THREE.MeshBasicMaterial({ color: '#0a84ff', transparent: true, opacity: 0.85 }));
+  const route = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 1), layer(new THREE.MeshBasicMaterial({ color: '#0a84ff', transparent: true, opacity: 0.85, depthWrite: false }), 3));
   route.rotation.x = -Math.PI / 2;
+  route.renderOrder = 2;
   scene.add(route);
-  const halo = new THREE.Mesh(new THREE.CircleGeometry(1, 48), new THREE.MeshBasicMaterial({ color: '#0a84ff', transparent: true, opacity: 0.14, depthWrite: false }));
+  const halo = new THREE.Mesh(new THREE.CircleGeometry(1, 48), layer(new THREE.MeshBasicMaterial({ color: '#0a84ff', transparent: true, opacity: 0.14, depthWrite: false }), 4));
   halo.rotation.x = -Math.PI / 2;
+  halo.renderOrder = 3;
   scene.add(halo);
   const dotTex = (() => {
     const cv = document.createElement('canvas'); cv.width = cv.height = 128;
@@ -208,9 +230,8 @@ export function createCity(canvas, { labelLayer } = {}) {
       const dist = Math.hypot(b.x - LANE_X, b.z - carPos.z);
       const f = clamp01((k - dist / 900) / 0.9);
       if (f < 1) done = false;
-      const e = f === 0 ? 0.0001 : 1 - (1 - f) ** 3;
-      const h = Math.max(0.01, b.h * e);
-      m.compose(new THREE.Vector3(b.x, h / 2, b.z), new THREE.Quaternion(), new THREE.Vector3(b.w, h, b.d));
+      const h = Math.max(0.01, b.h * (1 - (1 - f) ** 3));
+      m.compose(new THREE.Vector3(b.x, f === 0 ? -2 : h / 2, b.z), new THREE.Quaternion(), new THREE.Vector3(b.w, h, b.d));
       buildings.setMatrixAt(i, m);
     });
     buildings.instanceMatrix.needsUpdate = true;
@@ -221,15 +242,14 @@ export function createCity(canvas, { labelLayer } = {}) {
   const look = new THREE.Vector3(), camPos = new THREE.Vector3(), tmp = new THREE.Vector3();
   function tick(now) {
     const time = (now - t0) / 1000;
-    const span = START_Z - END_Z;
-    carPos.set(LANE_X, 0, START_Z - ((time * SPEED) % span));
+    carPos.set(LANE_X, 0, START_Z - ((time * SPEED) % LOOP));
     car.position.copy(carPos);
     if (!built) built = animateBuildings(now);
     if (alpha < 0.003) { tag.style.opacity = 0; return; }
     // the route: from the car's nose, 380 m up the street
     route.scale.set(1, 380, 1);
-    route.position.set(LANE_X, 0.06, carPos.z - 2.4 - 190);
-    halo.position.set(carPos.x, 0.07, carPos.z);
+    route.position.set(LANE_X, 0.12, carPos.z - 2.4 - 190);
+    halo.position.set(carPos.x, 0.14, carPos.z);
     halo.scale.setScalar(6 + Math.sin(time * 2.4) * 0.8);
     dot.position.set(carPos.x, 2.4, carPos.z);
     // camera
@@ -237,10 +257,11 @@ export function createCity(canvas, { labelLayer } = {}) {
     camera.position.copy(carPos).add(camPos);
     camera.lookAt(tmp.copy(carPos).add(look));
     const hgt = camera.position.y;
+    const near = Math.min(600, Math.max(1, hgt * 0.1));
+    if (Math.abs(near - camera.near) > camera.near * 0.02) { camera.near = near; camera.updateProjectionMatrix(); }
     scene.fog.near = 180 + hgt * 0.9;
     scene.fog.far = 1300 + hgt * 3.4;
-    sun.position.set(carPos.x + 90, 170, carPos.z + 70);
-    sun.target.position.copy(carPos);
+    placeSun(tmp.set(carPos.x, 60, carPos.z + (g < 5 ? -230 : 230)));   // ahead of the car, or behind it at the end
     renderer.render(scene, camera);
     // the label over the blue dot, only while the story talks about it
     const ta = smooth(clamp01((g - 0.55) / 0.3)) * (1 - smooth(clamp01((g - 1.45) / 0.25))) * alpha;

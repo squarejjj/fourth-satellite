@@ -21,7 +21,7 @@ GPS satellites don't send your position. They send the time. Your phone times ea
    9. A fourth satellite: the phone shifts its clock guess until all four spheres agree, and finds you and the clock error together.
    10. In the real world: several satellite systems, the ionosphere, reflections and relativity.
    11. Back to the car: all of this happens every second.
-3. **Lab.** Click satellites to use or drop them, or try one-click experiments ("Break the clock", "Only 3 satellites", "Add noise", "Bunch them up"). The phone re-solves every time and shows how far off it is, the clock error it found and how well spread the satellites are (PDOP), with a sentence explaining what happened. More settings (clock error, random error, ionosphere delay, where you stand, spheres, moving satellites) are one click away, and a button takes you back to the explanation.
+3. **Lab.** Every setting sits on one panel: how many satellites to use, the phone's clock error, a random error on each distance, the ionosphere's delay, where you stand, and whether to show the spheres or let the satellites move. You can also click satellites to use or drop them. The phone re-solves every frame, and four big numbers at the top of the panel give its answer: how far off it is (tinted green, amber or red), the clock error it found, how many satellites it used and how well spread they are (PDOP), with a sentence explaining what happened. A button takes you back to the explanation.
 
 ## How it works
 

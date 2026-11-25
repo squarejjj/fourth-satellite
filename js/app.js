@@ -124,13 +124,7 @@ function onReadout(r) {
 // ── Lab ──
 const DEFAULTS = { n: 4, clockMs: 0.3, noise: 0, iono: 0, lat: 37.5, spheres: false, move: false };
 const lab = { ...DEFAULTS };
-let savedScroll = 0, lead = '';
-const EXPERIMENTS = {
-  clock: { set: { n: 4, clockMs: 1, noise: 0, iono: 0 }, lead: 'The phone’s clock is now 1 ms off: 300 km on every distance. ' },
-  three: { set: { n: 3, clockMs: 0.5, noise: 0, iono: 0 }, lead: '' },
-  noise: { set: { n: 4, clockMs: 0.3, noise: 8, iono: 0, reseed: true }, lead: 'Each distance now has up to about 8 m of random error, like a real receiver. ' },
-  bunch: { set: { bunched: true, clockMs: 0.3, noise: 8, iono: 0, reseed: true }, lead: 'These four satellites sit close together in your sky, with the same 8 m of random error. ' },
-};
+let savedScroll = 0, picked = null;          // picked: how many satellites you chose by clicking them
 document.getElementById('open-lab').addEventListener('click', () => {
   savedScroll = window.scrollY;
   body.classList.replace('mode-story', 'mode-lab');
@@ -141,45 +135,29 @@ document.getElementById('back').addEventListener('click', () => {
   body.classList.replace('mode-lab', 'mode-story');
   requestAnimationFrame(() => { window.scrollTo(0, savedScroll); gShown = gFromScroll(); });
 });
-document.getElementById('exps').addEventListener('click', (e) => {
-  const b = e.target.closest('button');
-  if (!b) return;
-  const ex = EXPERIMENTS[b.dataset.exp];
-  Object.assign(lab, { ...ex.set, bunched: !!ex.set.bunched });
-  delete lab.reseed;
-  lead = ex.lead;
-  earth.setLab({ ...ex.set, bunched: !!ex.set.bunched });
-  document.querySelectorAll('#exps button').forEach((q) => q.setAttribute('aria-pressed', String(q === b)));
-  syncControls();
-});
 document.getElementById('reset').addEventListener('click', () => {
   Object.assign(lab, DEFAULTS);
-  lead = '';
-  earth.setLab({ ...DEFAULTS, bunched: false });
-  document.querySelectorAll('#exps button').forEach((q) => q.setAttribute('aria-pressed', 'false'));
+  picked = null;
+  earth.setLab({ ...DEFAULTS });
+  earth.labCamera('space');
   syncControls();
 });
 document.querySelectorAll('#lab-n button').forEach((b) => b.addEventListener('click', () => {
-  lab.n = +b.dataset.n; lab.bunched = false; lead = '';
-  earth.setLab({ n: lab.n, bunched: false });
-  clearExperiment();
+  lab.n = +b.dataset.n;
+  picked = null;
+  earth.setLab({ n: lab.n });
   syncControls();
 }));
 for (const [id, key] of [['lab-clock', 'clockMs'], ['lab-noise', 'noise'], ['lab-iono', 'iono'], ['lab-lat', 'lat']]) {
   const el = document.getElementById(id);
-  el.addEventListener('input', () => { lab[key] = +el.value; lead = ''; clearExperiment(); earth.setLab({ [key]: lab[key] }); syncControls(); });
+  el.addEventListener('input', () => { lab[key] = +el.value; earth.setLab({ [key]: lab[key] }); syncControls(); });
 }
 for (const [id, key] of [['lab-spheres', 'spheres'], ['lab-move', 'move']]) {
   const el = document.getElementById(id);
   el.addEventListener('change', () => { lab[key] = el.checked; earth.setLab({ [key]: lab[key] }); });
 }
 document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => earth.labCamera(b.dataset.view)));
-function clearExperiment() { document.querySelectorAll('#exps button').forEach((q) => q.setAttribute('aria-pressed', 'false')); }
-function onPick(count) {
-  lab.bunched = false; lead = '';
-  clearExperiment();
-  document.querySelectorAll('#lab-n button').forEach((q) => q.setAttribute('aria-pressed', String(+q.dataset.n === count)));
-}
+function onPick(count) { picked = count; syncControls(); }
 function syncControls() {
   const set = (id, v) => { document.getElementById(id).value = v; };
   set('lab-clock', lab.clockMs); set('lab-noise', lab.noise); set('lab-iono', lab.iono); set('lab-lat', lab.lat);
@@ -189,21 +167,26 @@ function syncControls() {
   document.getElementById('o-noise').textContent = `${lab.noise} m`;
   document.getElementById('o-iono').textContent = `${lab.iono} m`;
   document.getElementById('o-lat').textContent = lab.lat === 0 ? 'equator' : `${Math.round(Math.abs(lab.lat))}°${lab.lat > 0 ? 'N' : 'S'}`;
-  document.querySelectorAll('#lab-n button').forEach((q) => q.setAttribute('aria-pressed', String(!lab.bunched && +q.dataset.n === lab.n)));
+  const n = picked ?? lab.n;
+  document.querySelectorAll('#lab-n button').forEach((q) => q.setAttribute('aria-pressed', String(+q.dataset.n === n)));
 }
 function labReadout(r) {
   const set = (id, text, cls = '') => { const el = document.getElementById(id); if (el.textContent !== text) el.textContent = text; el.className = `v ${cls}`; };
-  set('r-off', dist(r.off), r.off < 10 ? 'good' : r.off < 1000 ? 'warn' : 'bad');
+  const status = r.off < 10 ? 'good' : r.off < 1000 ? 'warn' : 'bad';
+  set('r-off', dist(r.off), status);
+  const card = document.getElementById('r-main');
+  if (card.className !== `main ${status}`) card.className = `main ${status}`;
   set('r-clock', r.n >= 4 && r.foundMs !== undefined ? `${sign(r.foundMs)}${Math.abs(r.foundMs).toFixed(3)} ms` : 'can’t tell', r.n >= 4 ? '' : 'bad');
   set('r-count', `${r.n} of ${r.visible}`, r.n >= 4 ? '' : 'bad');
   set('r-dop', r.pdop ? r.pdop.toFixed(1) : '—', r.pdop > 4 ? 'warn' : '');
+  // one short sentence on what happened (at most three lines, so the controls below never jump)
   let note;
-  if (r.n < 3) note = 'Too few satellites to say anything. Click the small grey satellites to add some.';
-  else if (r.n === 3) note = 'Three satellites, four unknowns (x, y, z and the clock): every point on the orange line fits. Click a grey satellite to add a fourth.';
-  else if (lab.noise > 0) note = `The answer moves by roughly PDOP × the random error. ${r.pdop > 4 ? 'Bunched satellites cross at shallow angles, so errors are magnified. Spread them out or add more.' : 'Add satellites, or spread them out, to shrink it.'}`;
-  else if (lab.iono > 0) note = 'The ionosphere delays low satellites more than high ones. The shared part goes into the clock; the rest moves you, mostly up or down.';
-  else note = 'Solved exactly, clock and all: with four or more satellites the clock error is just one more unknown.';
-  const text = lead + note;
+  if (r.n < 3) note = 'Too few satellites to say anything. Click a grey satellite to add one.';
+  else if (r.n === 3) note = 'Three satellites, four unknowns: every point on the orange line fits. Click a grey satellite to add a fourth.';
+  else if (lab.noise > 0 && r.pdop > 4) note = 'These satellites are bunched together, so their spheres cross at shallow angles and errors grow. Spread them out.';
+  else if (lab.noise > 0) note = 'Random errors move the answer by about PDOP × the error. Add satellites, or spread them out, to shrink it.';
+  else if (lab.iono > 0) note = 'The ionosphere delays low satellites most. The shared part goes into the clock; the rest moves you, mostly up or down.';
+  else note = 'Solved exactly, clock and all. Move the clock slider: the phone still finds you, because the clock is one more unknown.';
   const el = document.getElementById('r-note');
-  if (el.textContent !== text) el.textContent = text;
+  if (el.textContent !== note) el.textContent = note;
 }

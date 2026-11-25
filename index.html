@@ -82,37 +82,30 @@
   <h2>Lab</h2>
   <p class="lab-sub">You are the blue dot. <b>Click a satellite</b> to use or drop it. Drag to turn the Earth.</p>
 
-  <div class="result">
-    <div><span class="k">Phone’s answer is off by</span><span class="v" id="r-off">—</span></div>
+  <div class="result" aria-live="polite">
+    <div class="main" id="r-main"><span class="k">Phone’s answer is off by</span><span class="v" id="r-off">—</span></div>
     <div><span class="k">Clock error it found</span><span class="v" id="r-clock">—</span></div>
     <div><span class="k">Satellites used</span><span class="v" id="r-count">—</span></div>
     <div><span class="k">Spread (PDOP)</span><span class="v" id="r-dop">—</span></div>
   </div>
   <p class="note" id="r-note"></p>
 
-  <div class="ctl"><div class="lbl">Try an experiment</div>
-    <div class="exps" id="exps">
-      <button type="button" data-exp="clock">Break the clock</button>
-      <button type="button" data-exp="three">Only 3 satellites</button>
-      <button type="button" data-exp="noise">Add noise</button>
-      <button type="button" data-exp="bunch">Bunch them up</button>
-    </div></div>
-
-  <details class="settings">
-    <summary>All settings</summary>
-    <div class="ctl"><div class="lbl">Satellites used</div>
-      <div class="seg" id="lab-n" role="group" aria-label="Satellites used">
+  <div class="settings">
+    <div class="ctl"><div class="lbl">Number of satellites</div>
+      <div class="seg" id="lab-n" role="group" aria-label="Number of satellites">
         <button type="button" data-n="3">3</button><button type="button" data-n="4" aria-pressed="true">4</button><button type="button" data-n="5">5</button><button type="button" data-n="6">6</button><button type="button" data-n="8">8</button>
       </div></div>
-    <div class="ctl"><label for="lab-clock">Phone’s clock error <output id="o-clock">+0.30 ms</output></label><input type="range" id="lab-clock" min="-1" max="1" step="0.01" value="0.3"></div>
-    <div class="ctl"><label for="lab-noise">Random error per satellite <output id="o-noise">0 m</output></label><input type="range" id="lab-noise" min="0" max="20" step="0.5" value="0"></div>
-    <div class="ctl"><label for="lab-iono">Ionosphere delay, straight up <output id="o-iono">0 m</output></label><input type="range" id="lab-iono" min="0" max="15" step="0.5" value="0"></div>
-    <div class="ctl"><label for="lab-lat">Where you stand <output id="o-lat">38°N</output></label><input type="range" id="lab-lat" min="-80" max="80" step="1" value="37.5"></div>
+    <div class="sliders">
+      <div class="ctl"><label for="lab-clock" title="How far the phone’s own clock is off">Clock error <output id="o-clock">+0.30 ms</output></label><input type="range" id="lab-clock" min="-1" max="1" step="0.01" value="0.3"></div>
+      <div class="ctl"><label for="lab-noise" title="A random error added to each satellite’s distance">Random error <output id="o-noise">0 m</output></label><input type="range" id="lab-noise" min="0" max="20" step="0.5" value="0"></div>
+      <div class="ctl"><label for="lab-iono" title="The ionosphere’s delay for a satellite straight overhead; lower satellites get more">Ionosphere delay <output id="o-iono">0 m</output></label><input type="range" id="lab-iono" min="0" max="15" step="0.5" value="0"></div>
+      <div class="ctl"><label for="lab-lat" title="Your latitude">Where you stand <output id="o-lat">38°N</output></label><input type="range" id="lab-lat" min="-80" max="80" step="1" value="37.5"></div>
+    </div>
     <div class="ctl checks">
       <label class="check"><input type="checkbox" id="lab-spheres"> Show the spheres</label>
       <label class="check"><input type="checkbox" id="lab-move"> Satellites move</label>
     </div>
-  </details>
+  </div>
   <div class="views"><button class="link" type="button" data-view="you">Zoom to you</button><button class="link" type="button" data-view="space">View from space</button><button class="link" type="button" id="reset">Reset</button></div>
   <p class="links"><a href="tests.html">Check the maths</a> · <a href="https://github.com/squarejjj/fourth-satellite">Code</a></p>
 </aside>

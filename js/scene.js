@@ -75,11 +75,6 @@ function bestSet(vis, n) {
   used.sort(byAz);
   return n === 3 ? used.slice(0, 3) : used;
 }
-// Four satellites bunched together in one part of the sky (the worst geometry that still solves).
-function bunchedSet(vis) {
-  const ok = fours(vis).filter((x) => x.g < 30);
-  return ok.length ? ok.reduce((a, b) => (b.g > a.g ? b : a)).set.sort(byAz) : bestSet(vis, 4);
-}
 
 // ── Shaders: a soft blue rim of atmosphere, and glassy distance spheres ──
 const glowMaterial = () => new THREE.ShaderMaterial({
@@ -247,13 +242,17 @@ export function createScene(canvas, { labelLayer, onReadout = () => {}, onPick =
     const nearYou = (d) => ({ target: you.clone(), pos: you.clone().add(close.clone().multiplyScalar(d)) });
     const perp = new THREE.Vector3().subVectors(s1, you).cross(up).normalize();
     const mid = (f) => you.clone().lerp(s1, f);
+    // far enough out to see the first three satellites and all three spheres meeting at you
+    const first3 = story.four.slice(0, 3).reduce((a, q) => a.add(toV(q.pos)), new THREE.Vector3()).multiplyScalar(1 / 3);
+    const wideT = you.clone().lerp(first3, 0.42);
+    const wide = { target: wideT, pos: wideT.clone().add(perp.clone().add(up.clone().multiplyScalar(0.3)).normalize().multiplyScalar(56)), fit: true };
     return [
       [1.4, above(1.6)],                                                                               // just above you as the city fades
       [2.4, around(25, 0.9, 0.32, -0.28)],                                                             // the whole Earth, you near the middle
       [3.4, around(80, 0.8, 0.45, -0.3)],                                                              // the constellation
       [4.4, { target: mid(0.5), pos: mid(0.5).add(perp.clone().multiplyScalar(40)).add(up.clone().multiplyScalar(12)) }],  // one satellite and you
       [5.4, { target: mid(0.3), pos: mid(0.3).add(perp.clone().multiplyScalar(70)).add(up.clone().multiplyScalar(18)) }], // its sphere
-      [6.45, nearYou(13)],                                                                             // three spheres meet
+      [6.45, wide],                                                                                    // three spheres meet
       [7.4, nearYou(6.5)],                                                                             // a wrong clock
       [8.6, nearYou(6.5)],                                                                             // the fourth satellite
       [9.45, around(54, 0.85, 0.4, -0.35)],                                                            // many satellites
@@ -261,6 +260,8 @@ export function createScene(canvas, { labelLayer, onReadout = () => {}, onPick =
     ];
   })();
   const offA = new THREE.Vector3(), offB = new THREE.Vector3();
+  // a portrait screen sees much less from side to side, so wide shots marked `fit` step further back
+  const fitK = (k) => (k.fit && W < H ? Math.min(2, 0.95 * Math.sqrt((1.6 * H) / W)) : 1);
   function cameraAt(g, outPos, outTarget) {
     let i = 0;
     while (i < KEYS.length - 2 && g > KEYS[i + 1][0]) i++;
@@ -269,7 +270,7 @@ export function createScene(canvas, { labelLayer, onReadout = () => {}, onPick =
     outTarget.lerpVectors(a.target, b.target, f);
     // glide: blend the viewing direction and the zoom (distance on a log scale)
     offA.subVectors(a.pos, a.target); offB.subVectors(b.pos, b.target);
-    const da = offA.length(), db = offB.length();
+    const da = offA.length() * fitK(a), db = offB.length() * fitK(b);
     const dir = offA.normalize().lerp(offB.normalize(), f).normalize();
     outPos.copy(outTarget).add(dir.multiplyScalar(Math.exp(Math.log(da) + (Math.log(db) - Math.log(da)) * f)));
   }
@@ -350,7 +351,7 @@ export function createScene(canvas, { labelLayer, onReadout = () => {}, onPick =
   }
 
   // ── The lab ──
-  const lab = { n: 4, clockMs: 0.3, noise: 0, iono: 0, lat: STORY_LAT, spheres: false, move: false, ids: null, bunched: false, t: STORY_T, seed: 1 };
+  const lab = { n: 4, clockMs: 0.3, noise: 0, iono: 0, lat: STORY_LAT, spheres: false, move: false, ids: null, t: STORY_T, seed: 1 };
   let labView = null;
   function labFrame() {
     const P = llaToEcef(lab.lat, LON), B = enuBasis(lab.lat, LON);
@@ -359,7 +360,7 @@ export function createScene(canvas, { labelLayer, onReadout = () => {}, onPick =
     const vis = skyOf(P, B, positions);
     let used;
     if (lab.ids) used = lab.ids.map((id) => vis.find((q) => q.id === id)).filter(Boolean);
-    else used = lab.bunched ? bunchedSet(vis) : bestSet(vis, lab.n);
+    else used = bestSet(vis, lab.n);
     used.sort(byAz);
     labView = { vis, used };
     const g = gaussianSource(lab.seed);
@@ -403,7 +404,7 @@ export function createScene(canvas, { labelLayer, onReadout = () => {}, onPick =
     showTag('you', answer && off <= 2000 ? 'You = phone’s answer' : 'You', you, 1, { cls: 'blue' });
     if (ansDot.visible) showTag('ans', `phone’s answer · ${fmtKm(off)} off`, toV(answer), 1, { below: true, cls: 'orange', always: true });
     const dop = meas.length >= 4 ? dopFromSky(used) : null;
-    onReadout({ mode: 'lab', n: meas.length, visible: vis.length, off, foundMs: fix && fix.ok ? (fix.clock / C) * 1000 : undefined, pdop: dop && dop.ok ? dop.pdop : undefined, custom: !!lab.ids, bunched: lab.bunched });
+    onReadout({ mode: 'lab', n: meas.length, visible: vis.length, off, foundMs: fix && fix.ok ? (fix.clock / C) * 1000 : undefined, pdop: dop && dop.ok ? dop.pdop : undefined, custom: !!lab.ids });
   }
 
   // Click a satellite in the lab to use it or drop it.
@@ -427,7 +428,6 @@ export function createScene(canvas, { labelLayer, onReadout = () => {}, onPick =
     const ids = labView.used.map((q) => q.id);
     const has = ids.includes(s.id);
     lab.ids = has ? ids.filter((id) => id !== s.id) : [...ids, s.id];
-    lab.bunched = false;
     onPick(lab.ids.length);
   });
   canvas.addEventListener('pointermove', (e) => { if (mode === 'lab' && !e.buttons) canvas.style.cursor = satUnder(e) ? 'pointer' : ''; });
@@ -561,10 +561,7 @@ export function createScene(canvas, { labelLayer, onReadout = () => {}, onPick =
         camera.position.copy(p.pos);
         applyOffset();
       }
-      if ('n' in params) { lab.ids = null; lab.bunched = false; }
-      if (params.bunched) { lab.ids = null; }
-      if (params.reseed) lab.seed++;
-      delete params.reseed;
+      if ('n' in params) lab.ids = null;
       Object.assign(lab, params);
     },
     labCamera,
